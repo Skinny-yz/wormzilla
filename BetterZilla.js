@@ -6,7 +6,6 @@
 /////////////////////////////////////////
 //If you are Samet, or someone from the Wormzilla administration team, and you would like me to permanently delete or remove the extension, please get in touch with me via Discord.
 //Discord: _lzin07
-//i hard work for that extension, please give credits if you stolen that :)
 
 
 (() => {
