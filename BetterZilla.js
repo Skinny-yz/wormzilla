@@ -5,9 +5,7 @@
 //as well as to improve the experience for mobile devices—given that the game's HUD often receives a lot of criticism
 /////////////////////////////////////////
 //If you are Samet, or someone from the Wormzilla administration team, and you would like me to permanently delete or remove the extension, please get in touch with me via Discord.
-//Discord: _lzin07
-
-
+//Discord: skinny_yz
 (() => {
   'use strict';
 
@@ -17,6 +15,8 @@
   const nativeInterval = PAGE.setInterval.bind(PAGE);
   const nativeClearInterval = PAGE.clearInterval.bind(PAGE);
   const nativeRAF = PAGE.requestAnimationFrame.bind(PAGE);
+  // Sets of WeakRefs used to be pruned only when a toggle was flipped, so they grew with every
+  // snake / food item ever created. Prune dead refs as the set grows instead (amortized O(1)).
   function trackWeak(set, target, isDead) {
     set.add(new WeakRef(target));
     const n = set.size;
@@ -24,6 +24,10 @@
       for (const ref of set) { const item = ref.deref(); if (!item || isDead(item)) set.delete(ref); }
     }
   }
+  // ===== Aviso de atualizacao do jogo =====
+  // Quando o jogo atualiza (o JS dele muda), os hooks do mod podem parar de funcionar. Detectamos por dois caminhos:
+  //  1) impressao digital do bundle do jogo (nome + tamanho dos .js do proprio site) diferente da ultima que funcionou;
+  //  2) hooks que nao capturaram nada depois de um tempo em partida.
   const FORCE_UPDATE_NOTICE = false;    // true = mostra o aviso sempre (teste). Pra ver o desenho com false: rode betterzillaNotice() no console.
   const SUPPORTED_GAME_BUILDS = [];     // (opcional) builds que voce ja verificou: cole o id que aparece no console "[Betterzilla] game build hxxxx-yyy"
   const UPDATE_CONTACT = { handle: '@fantasma_worm', url: 'https://www.tiktok.com/@fantasma_worm' };
@@ -33,6 +37,9 @@
   function optimizeImages(root) {
     try { root.querySelectorAll('img').forEach(img => { if (!img.decoding || img.decoding === 'auto') img.decoding = 'async'; }); } catch {}
   }
+  // O mod depende de nomes internos do jogo (o jogo e minificado: cada build pode renomear tudo).
+  // Em vez de olhar o NOME do arquivo (que pode mudar a cada carregamento), baixamos o JS do jogo (vem do cache do navegador)
+  // e conferimos se os trechos de que o mod precisa ainda existem. Se quase todos existem, o mod continua funcionando: sem aviso.
   const GAME_SIGNATURES = [
     ['camera Re', /\.Re=/], ['preview lc', /\.lc=/], ['nametag ce', /\.ce=/], ['effects ga', /this\.ga=\{\}/],
     ['snake Pe', /\.prototype\.Pe=/], ['snake Le', /\.prototype\.Le=/], ['snake init', /\.prototype\.(?:ck|dk)=function/], ['score popups', /\.prototype\.(?:Pl|Ol)=function\(\w\)\{var \w,\w;this\.Zc\+=/], ['effect icons Eb', /\.Eb\b/], ['effect state Oe', /this\.Oe=1/],
@@ -42,6 +49,7 @@
   ];
   const GAME_SIGNATURES_MAX_MISSING = 2;   // 3 ou mais sumiram = o jogo foi remexido de verdade
   function migrateNoticeState() {
+    // versao antiga do aviso guardava impressoes digitais por nome de arquivo: descarta pra nao dar falso alarme
     if (store.get('wzg-notice-schema') === '2') return;
     for (const k of ['wzg-baseline-build', 'wzg-trusted-build', 'wzg-broken-build', 'wzg-notice-dismissed']) store.remove(k);
     store.set('wzg-notice-schema', '2');
@@ -86,6 +94,7 @@
     })();
     return bzCompatPromise;
   }
+  // Um hook funcionou numa partida: esse build do jogo e considerado compativel pra esse usuario.
   function bzSignal(name) {
     if (bzHealth[name]) return;
     bzHealth[name] = true;
@@ -111,6 +120,7 @@
     return false;                                                // JS conhecido/compativel: nunca avisa (nem na primeira abertura)
   }
   function hideUpdateNotice() { document.getElementById('wzg-notice')?.remove(); }
+  // Console: betterzillaNotice() mostra o aviso na hora (pra ver o desenho)
   PAGE.betterzillaNotice = () => { updateNoticeClosed = false; hideUpdateNotice(); maybeShowUpdateNotice(true); };
   function ensureNoticeStyle() {
     if (document.getElementById('wzg-notice-style')) return;
@@ -202,14 +212,18 @@
     root.querySelector('.wzn-btn.primary')?.focus({ preventScroll: true });
   }
 
+  // localStorage seguro: nunca derruba o script (modo privado / quota cheia).
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { localStorage.setItem(k, v); return true; } catch { return false; } },
     remove(k) { try { localStorage.removeItem(k); } catch {} }
   };
 
+  // ===== Assets externos (imagens ficam no GitHub, baixadas só quando a opção é usada) =====
+  // URL RAW da pasta de assets (termina com /).
   const ASSET_BASE = 'https://raw.githubusercontent.com/Skinny-yz/assets/refs/heads/main/';
   const assetCache = new Map();
+  // Cache persistente (Cache Storage): as imagens do GitHub so sao baixadas uma vez por versao da extensao.
   const ASSET_CACHE_NAME = 'betterzilla-assets-' + ((typeof GM_info !== 'undefined' && GM_info && GM_info.script && GM_info.script.version) || '0');
   let assetCachePruned = false;
   async function assetCacheStorage() {
@@ -249,6 +263,7 @@
     return promise;
   }
 
+  // Same idea as assetURL, but returns the file as text (used for custom).
   function assetText(name) {
     const url = /^https?:\/\//.test(name) ? name : ASSET_BASE + name;
     return new Promise((resolve, reject) => {
@@ -432,6 +447,7 @@
     { id: 'preset-4', name: 'Mountain IV', url: 'https://i.pinimg.com/1200x/23/98/0a/23980a9741b8d711778f50586754f830.jpg' },
   ];
 
+  // Native map textures used by the game after a match starts.
   const DEFAULT_MAP_PREVIEW = 'https://wormzilla.io/bgs/bg_default.webp';
   const nativeMapPreview = value => {
     if (value === 'Custom') return state.mapCustomPreview;
@@ -485,6 +501,9 @@
     if (killFeedPush || killFeedCaptured) return;
     previousPush = proto.push;
     const base = previousPush;
+    // Hook global temporario: so existe ate achar o array do kill feed.
+    // Hot path: every Array#push in the page goes through here until the feed array is found, so the
+    // common single-argument case avoids materializing `arguments` and uses a plain call.
     const hook = function(item) {
       if (arguments.length === 1) {
         if (isKillEntry(item)) {
@@ -504,6 +523,7 @@
     killFeedPush = hook;
     proto.push = hook;
   }
+  // O jogo recria o array do feed a cada entrada em partida (U.Yg = []), entao rearma ao clicar em jogar.
   function rearmKillFeedFilter() {
     if (!state.prefs.hideKillFeed || killFeedPush) return;
     killFeedCaptured = false;
@@ -511,6 +531,7 @@
   }
 
   function cleanDOMKillFeed() {
+    // Only semantic feed containers: never walk every element or measure geometry.
     document.querySelectorAll('#killFeed, #kill-feed, .kill-feed, .killfeed, .wzg-kill-feed-hidden')
       .forEach(node => node.classList.toggle('wzg-kill-feed-hidden', !!state.prefs.hideKillFeed));
   }
@@ -2582,7 +2603,10 @@
   const EXTRA_CSS = "\n/* Compact token action; preserve the native button and its click handler. */\n.wzg-ready .player-card .wzg-token-value { display:flex!important; align-items:center!important; gap:4px!important; flex-wrap:wrap!important; width:100%!important; min-width:0!important; overflow:visible!important; white-space:normal!important; }\n.wzg-ready .player-card .wzg-token-value #nameTokenCount.change-token-no { min-width:20px!important; height:24px!important; padding:0 5px!important; flex:0 0 auto!important; font-size:10px!important; }\n.wzg-ready .player-card .change-name-btn {\n  display:inline-flex!important; align-items:center!important; justify-content:center!important;\n  width:auto!important; min-width:60px!important; max-width:100%!important; height:24px!important; min-height:24px!important;\n  padding:4px!important; gap:3px!important; margin:0!important; flex:0 0 auto!important; float:none!important;\n  font-size:10px!important; font-weight:600!important; line-height:1!important; white-space:nowrap!important; text-transform:none!important; letter-spacing:0!important;\n  position:static!important; background:rgba(255,255,255,.065)!important; color:#d5d5dc!important;\n  border:1px solid rgba(255,255,255,.12)!important; border-radius:8px!important;\n  box-shadow:inset 0 1px rgba(255,255,255,.04)!important; backdrop-filter:blur(8px)!important;\n}\n.wzg-ready .player-card .change-name-btn:hover { background:rgba(255,255,255,.14)!important; color:white!important; }\n.wzg-ready .player-card .change-name-btn svg { width:12px!important; height:12px!important; flex:none!important; }\n.wzg-ready .player-card .change-name-btn:focus-visible { outline:2px solid #ddd!important; outline-offset:2px; }\n.wzg-ready #tab-extension .wzg-speed-option { grid-column:1 / -1!important; display:block!important; width:100%!important; min-width:0!important; }\n#wzg-speed-controls { display:grid; gap:14px; width:100%; }\n#wzg-speed-controls .wzg-speed-entry { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }\n#wzg-speed-controls input[type=number] { width:110px; padding:9px 12px; color:#eee; background:rgba(255,255,255,.06); border:1px solid var(--wzg-line); border-radius:9px; }\n#wzg-speed-controls button { padding:8px 12px; border:1px solid var(--wzg-line); background:rgba(255,255,255,.06); color:#ddd; border-radius:9px; cursor:pointer; }\n#wzg-speed-controls button:hover, #wzg-speed-controls button.is-active { background:rgba(255,255,255,.14); color:#fff; }\n#wzg-speed-controls input[type=range] { width:100%; }\n#wzg-speed-controls output { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; }\n#wzg-speed-controls .wzg-speed-hint { color:var(--wzg-dim); font-size:12px; line-height:1.5; }\n.wzg-ready #tab-extension .wzg-font-option { grid-column:1 / -1!important; display:flex!important; flex-wrap:wrap!important; gap:12px!important; }\n#wzg-font-preview { flex-basis:100%; font-size:18px; color:#eee; padding:12px; border:1px solid var(--wzg-line); border-radius:9px; background:rgba(255,255,255,.03); }\n#wzg-font-status { flex-basis:100%; }\n#wzg-font-reload { border:1px solid var(--wzg-line); border-radius:8px; background:rgba(255,255,255,.08); padding:8px 12px; color:#eee; cursor:pointer; }\n#wzg-font-reload[hidden] { display:none!important; }\n.wzg-ready #tab-extension #wzg-extra-options { display:block!important; grid-column:1 / -1!important; width:100%; min-width:0; padding:20px!important; background:rgba(20,20,24,.6)!important; backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,.09)!important; border-radius:18px!important; }\n#wzg-extra-options label { font-size:13px; color:#ddd; }\n#wzg-extra-options input[type=range] { display:block; width:100%; margin-top:8px; }\n#wzg-extra-options output { float:right; font-variant-numeric:tabular-nums; }\n#wzg-extra-options .wzg-extra-toggle { display:flex; align-items:center; justify-content:space-between; gap:16px; }\n#wzg-extra-options .wzg-extra-heading { display:flex!important; align-items:center; justify-content:space-between; gap:12px; margin-bottom:20px; }\n#wzg-extra-options .wzg-extra-eyebrow { font-size:9px; font-weight:700; letter-spacing:.15em; color:#777780; }\n#wzg-extra-options h4 { margin:5px 0 0; font-size:17px; font-weight:700; color:#f0f0f2; }\n#wzg-extra-options .wzg-extra-badge { font-size:8px; letter-spacing:.1em; color:#9999a1; border:1px solid rgba(255,255,255,.1); border-radius:20px; padding:5px 8px; white-space:nowrap; }\n#wzg-extra-options .wzg-extra-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr)); gap:14px; }\n#wzg-extra-options .wzg-extra-card { display:block!important; min-width:0; margin:0!important; padding:18px!important; border-radius:14px; border:1px solid rgba(255,255,255,.07); background:linear-gradient(140deg,rgba(255,255,255,.04),rgba(255,255,255,.012)); box-shadow:inset 0 1px rgba(255,255,255,.025); }\n#wzg-extra-options .wzg-extra-card>header { display:flex!important; align-items:center; gap:10px; margin-bottom:20px; }\n#wzg-extra-options .wzg-extra-icon { display:grid; place-items:center; width:32px; height:32px; border:1px solid rgba(255,255,255,.08); border-radius:10px; background:rgba(255,255,255,.04); }\n#wzg-extra-options .wzg-extra-icon svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.7; }\n#wzg-extra-options h5 { margin:0; color:#ededf0; font-size:13px; font-weight:650; }\n#wzg-extra-options p, #wzg-extra-options small { display:block; margin:4px 0 0; font-size:10px; color:#888892; line-height:1.5; font-weight:400; }\n#wzg-extra-options .wzg-extra-range { display:block; margin:0 0 20px; }\n#wzg-extra-options .wzg-extra-range>span { display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:12px; }\n#wzg-extra-options output { float:none; min-width:40px; text-align:center; padding:3px 7px; border:1px solid rgba(255,255,255,.09); background:rgba(255,255,255,.05); border-radius:7px; font-size:10px; font-weight:600; }\n#wzg-extra-options input[type=range] { appearance:none!important; -webkit-appearance:none!important; height:5px!important; min-height:0!important; padding:0!important; margin:13px 0 7px!important; border:0!important; border-radius:99px!important; background:linear-gradient(to right,#bdbdc7 0 var(--wzg-fill,0%),rgba(255,255,255,.1) var(--wzg-fill,0%) 100%)!important; cursor:pointer; }\n#wzg-extra-options input[type=range]::-webkit-slider-thumb { appearance:none; width:13px; height:13px; border:2px solid #e5e5eb; background:#d6d6df; border-radius:50%; box-shadow:0 0 0 3px rgba(255,255,255,.06); }\n#wzg-extra-options .wzg-extra-toggle { padding:13px 0; border-top:1px solid rgba(255,255,255,.065); cursor:pointer; }\n#wzg-extra-options .wzg-extra-toggle:last-child { padding-bottom:0; }\n#wzg-extra-options .wzg-extra-copy { min-width:0; }\n#wzg-extra-options .wzg-extra-copy strong { font-size:12px; font-weight:500; color:#dcdce3; }\n#wzg-extra-options .wzg-extra-switch { position:relative; display:block; width:34px; height:20px; flex:0 0 34px; }\n#wzg-extra-options .wzg-extra-switch input { position:absolute!important; inset:0!important; width:100%!important; height:100%!important; margin:0!important; opacity:0!important; cursor:pointer; z-index:1; }\n#wzg-extra-options .wzg-extra-track { display:block; width:34px; height:20px; border-radius:99px; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.07); transition:background .15s; }\n#wzg-extra-options .wzg-extra-track::after { content:''; display:block; width:12px; height:12px; margin:3px; border-radius:50%; background:#80808a; transition:transform .15s,background .15s; }\n#wzg-extra-options .wzg-extra-switch input:checked+.wzg-extra-track { background:rgba(225,225,238,.23); border-color:rgba(255,255,255,.25); }\n#wzg-extra-options .wzg-extra-switch input:checked+.wzg-extra-track::after { transform:translateX(14px); background:#f2f2f7; }\n#wzg-extra-options input:focus-visible { outline:2px solid #bbb!important; outline-offset:5px; }\n#wzg-extra-options .wzg-extra-switch input:focus-visible+.wzg-extra-track { outline:2px solid #bbb; outline-offset:3px; }\n\n/* Keep native modal header rules out of nested preference cards. */\nhtml.wzg-ready #wzg-extra-options .wzg-extra-heading,\nhtml.wzg-ready #wzg-extra-options .wzg-extra-card>header {\n  position:static!important; inset:auto!important; transform:none!important;\n  width:auto!important; min-width:0!important; height:auto!important; min-height:0!important;\n  padding:0!important; margin:0 0 20px!important; border:0!important; border-radius:0!important;\n  background:none!important; box-shadow:none!important; backdrop-filter:none!important;\n  text-align:left!important; flex-shrink:0!important;\n}\nhtml.wzg-ready #wzg-extra-options .wzg-extra-card>header { justify-content:flex-start!important; gap:10px!important; }\nhtml.wzg-ready #wzg-extra-options .wzg-extra-heading { justify-content:space-between!important; }\nhtml.wzg-ready #wzg-extra-options .wzg-extra-card>header>div { text-align:left!important; margin:0!important; }\nhtml.wzg-ready #wzg-extra-options .wzg-extra-grid { margin:0!important; gap:16px!important; align-items:stretch; }\nhtml.wzg-ready #tab-extension>.wzg-kill-feed-option {\n  grid-column:1 / -1!important; width:100%!important; min-width:0!important;\n  display:flex!important; flex-direction:row!important; align-items:center!important;\n  justify-content:space-between!important; gap:20px!important; padding:18px 20px!important;\n}\nhtml.wzg-ready #tab-extension>.wzg-kill-feed-option .opL { flex:1!important; min-width:0; }\nhtml.wzg-ready #tab-extension>.wzg-kill-feed-option .opR { width:auto!important; flex:0 0 auto!important; margin:0!important; }\nhtml.wzg-ready #tab-extension>.wzg-speed-option { padding:20px!important; border-radius:18px!important; background:rgba(23,23,28,.6)!important; border:1px solid rgba(255,255,255,.09)!important; backdrop-filter:blur(10px); }\n#wzg-speed-controls { gap:18px!important; }\n#wzg-speed-controls .wzg-speed-head { display:flex; align-items:center; justify-content:space-between; gap:16px; }\n#wzg-speed-controls .wzg-speed-title { display:flex; align-items:center; gap:11px; }\n#wzg-speed-controls .wzg-speed-title strong { display:block; font-size:14px; color:#eee; }\n#wzg-speed-controls .wzg-speed-title small { display:block; margin-top:4px; color:#888892; font-size:11px; }\n#wzg-speed-controls .wzg-speed-icon { display:grid; place-items:center; width:36px; height:36px; border-radius:11px; background:rgba(255,255,255,.045); border:1px solid rgba(255,255,255,.09); }\n#wzg-speed-controls .wzg-speed-icon svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.7; }\n#wzg-speed-controls .wzg-speed-surface { display:grid; gap:16px; min-width:0; padding:18px; background:linear-gradient(130deg,rgba(255,255,255,.04),rgba(255,255,255,.01)); border:1px solid rgba(255,255,255,.065); border-radius:13px; }\n#wzg-speed-controls .wzg-speed-meter { display:flex; justify-content:space-between; align-items:center; gap:14px; }\n#wzg-speed-controls .wzg-speed-meter>span { color:#888892; font-size:9px; font-weight:600; letter-spacing:.12em; }\n#wzg-speed-controls #wzg-speed-readout { font-size:27px!important; padding:0!important; background:none!important; border:0!important; color:#f0f0f5; }\n#wzg-speed-controls .wzg-speed-form { display:grid!important; grid-template-columns:minmax(0,1fr) auto auto; gap:8px!important; }\n#wzg-speed-controls #wzg-speed-number { width:100%!important; min-width:0!important; height:36px!important; margin:0!important; padding:8px 11px!important; border-radius:9px!important; background:rgba(0,0,0,.2)!important; }\n#wzg-speed-controls button { height:36px; margin:0!important; font-size:11px; white-space:nowrap; transition:background .15s; }\n#wzg-speed-controls #wzg-speed-apply { background:rgba(230,230,240,.17); border-color:rgba(255,255,255,.18); color:#fff; }\n#wzg-speed-controls .wzg-speed-presets { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; }\n#wzg-speed-controls #wzg-speed-range { margin:8px 0!important; height:5px!important; min-height:0!important; padding:0!important; appearance:none!important; border:0!important; border-radius:99px!important; background:rgba(255,255,255,.13)!important; }\n#wzg-speed-controls #wzg-speed-range::-webkit-slider-thumb { appearance:none; width:13px; height:13px; background:#e2e2ea; border:2px solid #eee; border-radius:50%; box-shadow:0 0 0 3px rgba(255,255,255,.06); }\n#wzg-speed-controls #wzg-speed-status { font-size:10px; color:#868690; margin:0; line-height:1.6; }\n@media(max-width:500px) { #wzg-speed-controls .wzg-speed-form { grid-template-columns:1fr 1fr; } #wzg-speed-controls #wzg-speed-number { grid-column:1 / -1; } }\n\n/* The selected sector must never paint over the center cap. */\nhtml.wzg-ready .pizza-respawn-picker { isolation:isolate!important; }\nhtml.wzg-ready .pizza-respawn-picker .pizza-dilim,\nhtml.wzg-ready .pizza-respawn-picker .pizza-dilim:hover,\nhtml.wzg-ready .pizza-respawn-picker .pizza-dilim.active,\nhtml.wzg-ready .pizza-respawn-picker .pizza-dilim.selected {\n  position:relative!important; inset:auto!important; z-index:1!important;\n}\nhtml.wzg-ready .pizza-respawn-picker::before {\n  z-index:5!important; opacity:1!important; background:#19191c!important;\n  pointer-events:none!important; mix-blend-mode:normal!important;\n}\nhtml.wzg-ready .pizza-respawn-picker .vip-a { z-index:6!important; }\n";
 
   const INGAME_CSS = 'html.wzg-ingame body::before,html.wzg-ingame body::after{display:none!important}html.wzg-ingame .shell,html.wzg-ingame header{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}html.wzg-ingame #app::before{display:none!important}'
+    // Partida: nenhum elemento pode ter backdrop-filter (blur em cima do WebGL custa caro, principalmente no celular).
+    // O :not(#x) so existe pra ganhar das regras antigas com !important e seletor mais forte.
     + 'html.wzg-ingame:not(#a):not(#b):not(#c) body *,html.wzg-ingame:not(#a):not(#b):not(#c) body *::before,html.wzg-ingame:not(#a):not(#b):not(#c) body *::after{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}'
+    // sem o blur o fundo some um pouco: escurece mais a cortina atras dos modais
     + 'html.wzg-ingame:not(#a):not(#b):not(#c) .settings-overlay,html.wzg-ingame:not(#a):not(#b):not(#c) .wzs-dim,html.wzg-ingame:not(#a):not(#b):not(#c) .modal-dim{background:rgba(0,0,0,.72)!important}';
   function injectStyle() {
     if (document.getElementById(`${ID}-style`)) return;
@@ -2592,6 +2616,7 @@
     document.head.appendChild(style);
   }
 
+  // ===== Layout trocado (desktop): salas na esquerda, navegação na direita =====
   const DESKTOP_MQ = PAGE.matchMedia('(min-width: 901px)');
   function injectSwapStyle() {
     if (document.getElementById(`${ID}-swap-style`)) return;
@@ -2705,12 +2730,14 @@
       if (nav && nav.parentElement !== center) center.appendChild(nav);
       root.classList.add('wzg-swap');
     } else {
+      // Mobile/estreito: volta ao layout original
       if (rooms && rooms.parentElement !== center) center.appendChild(rooms);
       if (nav && nav.parentElement !== left) left.insertBefore(nav, left.querySelector('#manualInfoBox'));
       root.classList.remove('wzg-swap');
     }
   }
 
+  // Bandeiras com cantos arredondados e contorno fino (viewBox 30x20).
   const wzgFlag = inner => "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 20'><defs><clipPath id='c'><rect width='30' height='20' rx='2.6'/></clipPath></defs><g clip-path='url(#c)'>" + inner + "</g><rect x='.6' y='.6' width='28.8' height='18.8' rx='2.1' fill='none' stroke='#fff' stroke-opacity='.45' stroke-width='1.2'/></svg>";
   const WZG_FLAG_SVG = {
     fr: wzgFlag("<rect width='10' height='20' fill='#0055a4'/><rect x='10' width='10' height='20' fill='#fff'/><rect x='20' width='10' height='20' fill='#ef4135'/>"),
@@ -2731,7 +2758,9 @@
     const logo = document.querySelector('.logo-item img');
     const headImg = head.querySelector('img');
     if (logo && headImg && !headImg.src) headImg.src = logo.currentSrc || logo.src;
+    // O card fica FORA do painel de salas, logo acima dele.
     if (box.parentElement && head.nextElementSibling !== box) box.parentElement.insertBefore(head, box);
+    // Logo grande no topo da coluna central (mesma imagem do card Rooms).
     const centerEl = document.getElementById('centerPanel');
     if (centerEl) {
       let top = document.getElementById('wzg-top-logo');
@@ -2780,6 +2809,7 @@
   }
 
 
+  // ===== Patch: CSS extra (separador dos cards, scroll mobile, botao/editor de HUD) =====
   function injectPatchStyle() {
     if (document.getElementById('wzg-patch-style')) return;
     installColorPicker();
@@ -3033,6 +3063,7 @@
     box.insertAdjacentElement('afterend', btn);
   }
 
+  // ===== Seletor de cor custom (substitui o nativo do navegador) =====
   function syncColorLabel(input) {
     let out = input.id ? document.getElementById(input.id + 'Out') : null;
     if (!out) out = input.closest('.opR')?.querySelector('.val, .hex, output, input[type="text"]');
@@ -3127,11 +3158,13 @@
       document.addEventListener('keydown', onKey, true);
       PAGE.addEventListener('resize', onResize);
     }
+    // cliques em qualquer input[type=color] abrem o nosso seletor em vez do nativo
     document.addEventListener('click', e => {
       const t = e.target;
       if (!t || !t.matches || !t.matches('input[type="color"]')) return;
       e.preventDefault(); e.stopPropagation(); open(t);
     }, true);
+    // o texto do hex ao lado do quadradinho as vezes ficava velho: sincroniza com o valor real
     nativeInterval(() => {
       if (document.hidden || document.documentElement.classList.contains('wzg-ingame')) return;
       if (!document.querySelector('.settings-wrap.active, #wzg-extra-options')) return;
@@ -3140,6 +3173,7 @@
     document.addEventListener('input', e => { if (e.target?.matches?.('input[type="color"]')) syncColorLabel(e.target); }, true);
   }
 
+  // ===== Ate 3 backgrounds custom (o jogo so guarda 1: a gente guarda 3 e injeta o escolhido no input nativo) =====
   const BG_SLOTS_KEY = 'wzg-bg-slots', BG_ACTIVE_KEY = 'wzg-bg-active';
   function readBgSlots() {
     try { const a = JSON.parse(store.get(BG_SLOTS_KEY)); if (Array.isArray(a)) return [0, 1, 2].map(i => (a[i] && a[i].data ? a[i] : null)); } catch {}
@@ -3597,8 +3631,12 @@
     renderSaved();
   }
 
+  // ===== Alinha o topo das colunas centro/direita com o topo do card Rooms (logo abaixo do perfil) =====
+  // Ajuste fino em px: negativo sobe, positivo desce.
   const HOME_TOP_ADJUST = 0;
+  // Ajuste extra da coluna da direita e da logo, em relacao ao topo do card de perfil (negativo sobe).
   const RIGHT_TOP_ADJUST = 0;
+  // Altura da logo do Wormzilla no topo do centro (px). Maior = card central desce mais.
   const LOGO_HEIGHT = 120;
   let alignBound = false;
   function alignHomeColumns() {
@@ -3639,6 +3677,7 @@
     }
   }
 
+  // ===== Opcoes do Betterzilla direto na home (painel direito) =====
   function mountHomeOptions() {
     const right = document.querySelector('.shell > .panel:last-child');
     if (!right) return;
@@ -3741,6 +3780,7 @@
     });
   }
 
+  // ===== Store hub: tela inicial com Clothing / Skins (estilo Wormate) =====
   let storeHubBound = false;
   function storeTitle(modal, skinsActive) {
     const view = modal.dataset.wzgView || 'hub';
@@ -3754,6 +3794,7 @@
     if (title && title.textContent !== desired) title.textContent = desired;
   }
   function mountStoreHub(modal) {
+    // Ao abrir a store (modal novo ou reaberto) sempre comeca no hub.
     if (!modal.dataset.wzgView || !modal.getClientRects().length) setStoreView(modal, 'hub');
 
     if (!modal.querySelector('.wzg-store-hub')) {
@@ -3782,6 +3823,7 @@
       });
     }
 
+    // Botao voltar: dentro de Clothing/Skins volta pro hub; no hub fecha a store.
     if (modal.dataset.wzgHubBack !== '1') {
       modal.dataset.wzgHubBack = '1';
       modal.addEventListener('click', event => {
@@ -3793,6 +3835,7 @@
       }, true);
     }
 
+    // Clicou em Store (sidebar ou botao nativo): reabre no hub.
     if (!storeHubBound) {
       storeHubBound = true;
       document.addEventListener('click', event => {
@@ -4082,7 +4125,7 @@
     mountConfigFiles(modal);
     if(!document.getElementById('wzg-sidebar-order-style')){const style=document.createElement('style');style.id='wzg-sidebar-order-style';style.textContent="html.wzg-ready .settings-modal,html.wzg-ready .settings-modal *{scrollbar-width:thin!important;scrollbar-color:rgba(190,190,205,.28) transparent!important}html.wzg-ready .settings-modal ::-webkit-scrollbar{width:6px!important;height:6px!important;background:transparent!important}html.wzg-ready .settings-modal ::-webkit-scrollbar-track{background:transparent!important;border:0!important;box-shadow:none!important;margin:8px 0!important}html.wzg-ready .settings-modal ::-webkit-scrollbar-thumb{background:rgba(190,190,205,.25)!important;border:1px solid rgba(255,255,255,.07)!important;border-radius:999px!important;box-shadow:inset 0 1px rgba(255,255,255,.08)!important}html.wzg-ready .settings-modal ::-webkit-scrollbar-thumb:hover{background:rgba(210,210,225,.42)!important}html.wzg-ready .settings-modal ::-webkit-scrollbar-thumb:active{background:rgba(220,220,235,.55)!important}html.wzg-ready .settings-modal ::-webkit-scrollbar-button{display:none!important;width:0!important;height:0!important}html.wzg-ready .settings-modal ::-webkit-scrollbar-corner{background:transparent!important}@supports selector(::-webkit-scrollbar){html.wzg-ready .settings-modal,html.wzg-ready .settings-modal *{scrollbar-width:auto!important;scrollbar-color:auto!important}}"+'html.wzg-ready #settings-tabs .wzg-sidebar-divider{height:1px;min-height:1px;flex:0 0 1px;background:rgba(255,255,255,.14);margin:9px 8px 10px;pointer-events:none}'+"html.wzg-ready #settings-tabs,html.wzg-ready .settings-body,html.wzg-ready .settings-modal .wc-groups{scrollbar-width:thin!important;scrollbar-color:#55555f #141416!important;color-scheme:dark!important}html.wzg-ready #settings-tabs::-webkit-scrollbar,html.wzg-ready .settings-body::-webkit-scrollbar{width:6px!important;background:#141416!important}html.wzg-ready #settings-tabs::-webkit-scrollbar-track,html.wzg-ready .settings-body::-webkit-scrollbar-track{background:#141416!important}html.wzg-ready #settings-tabs::-webkit-scrollbar-thumb,html.wzg-ready .settings-body::-webkit-scrollbar-thumb{background:#55555f!important;border-radius:99px!important;border:1px solid #141416!important}html.wzg-ready #settings-tabs::-webkit-scrollbar-button,html.wzg-ready .settings-body::-webkit-scrollbar-button{display:none!important;height:0!important;width:0!important}";document.head.appendChild(style);}
 
-    mountCustomSettings(modal);
+    mountCustomSettings(modal,CUSTOM_TABS.custom);mountCustomSettings(modal,CUSTOM_TABS.wormworld);
     const settingsTabs=modal.querySelector('#settings-tabs');if(settingsTabs){const config=settingsTabs.querySelector('[data-tab="configfiles"]');if(config)settingsTabs.appendChild(config);const extension=settingsTabs.querySelector('[data-tab="extension"]');if(extension&&!settingsTabs.querySelector('.wzg-sidebar-divider')){const divider=document.createElement('div');divider.className='wzg-sidebar-divider';divider.setAttribute('role','separator');extension.before(divider);}}
 
     mountFontSettings(modal);
@@ -4255,8 +4298,11 @@
     }
   }
 
+  // O snake view guarda o controlador do HUD em xj (antes yj/wj).
   const hudOf=o=>o?.xj||o?.yj||o?.wj;
   const zoomKey=n=>typeof n.dj==='function'?'dj':'ji';
+  // Camera state: kept ONLY so the minimap border can ask the game to redraw (see bindWormateMinimap).
+  // The camera zoom itself is no longer touched: the native property stays native.
   let nativeCameraState;
   function installNativeCameraAccess() {
     const proto=PAGE.Object.prototype;
@@ -4273,20 +4319,25 @@
   installNativeCameraAccess();
 
   const extraPrefs = loadJSON('wzg-game-extras', {
-    mobileHudLayout: true, hidePlayerTags: true, x1RedHelper: false, hideCurveIcon: false, wormateExtensionAbilities: false, replaceSpeedIcon: true, replaceMagnetIcon: true, antiLag: false, hideScorePopups: false, hideFoodGlow: false, lightFood: false, wormateFood: false, wormateAbilityHud: true, noScreenEffects: false, colorfulScoreboard: true,
-    recordTop3: true, rankRedesign: true, rankSize: 75, fullScores: true, saturation: 100, wormateEffectIcons: true,
+    mobileHudLayout: true, hidePlayerTags: true, x1RedHelper: false, hideCurveIcon: false, wormateExtensionAbilities: false, replaceSpeedIcon: true, replaceMagnetIcon: true, antiLag: false, perfPreset: false, hideScorePopups: false, hideFoodGlow: false, lightFood: false, wormateFood: false, wormworldGlow: false, wormateAbilityHud: true, noScreenEffects: false, colorfulScoreboard: true,
+    recordTop3: true, rankRedesign: true, rankSize: 75, fullScores: true, saturation: 100, wormateEffectIcons: true, onlySpeedCurveIcons: false,
   });
+  // Merge the former potion preference once; future saves contain one toggle.
   if(Object.hasOwn(extraPrefs,'wormatePotions')){
     if(extraPrefs.wormatePotions===true)extraPrefs.wormateFood=true;
     delete extraPrefs.wormatePotions;
     store.set('wzg-game-extras',JSON.stringify(extraPrefs));
   }
+  // The native zoom unlock option was removed: drop the stale saved flag.
   delete extraPrefs.nativeZoomUnlock;
+  // VIP / PLUS / TT tags are always hidden now (no toggle); TT gets a red dot instead.
   extraPrefs.hidePlayerTags=true;
   delete extraPrefs.optimizeBodyGlow;
+  // Only top 3 records, colorful leaderboard and styled rankings are native now (always on, no toggles).
   extraPrefs.recordTop3=true;
   extraPrefs.colorfulScoreboard=true;
   extraPrefs.rankRedesign=true;
+  // Wormate ability HUD, speed icon and magnet effect are native now (always on, no toggles).
   extraPrefs.wormateAbilityHud=true;
   extraPrefs.replaceSpeedIcon=true;
   extraPrefs.replaceMagnetIcon=true;
@@ -4295,10 +4346,12 @@
   function applyGameSaturation(){if(!saturationStyle){saturationStyle=document.createElement('style');saturationStyle.id='wzg-game-saturation';(document.head||document.documentElement).appendChild(saturationStyle);}saturationStyle.textContent=extraPrefs.saturation===100?'':'#gameCanvas{filter:saturate('+extraPrefs.saturation+'%)!important;}';}
   applyGameSaturation();
 const speedReplacementRefs=new Set(),speedReplacementBound=new WeakSet();
+// "Show speed & curve like Wormate extensions" implies the green speed icon.
 const speedCustomOn=()=>!!(extraPrefs.replaceSpeedIcon||extraPrefs.wormateExtensionAbilities);
 const curveCustomOn=()=>!!extraPrefs.wormateExtensionAbilities;
 let greenSpeedTexture=null,greenSpeedLoading=null;
 
+// Ajuste fixo do ícone de velocidade (valores do Speed Icon Tuner)
 const SPEED_ICON_SIDE = -0.10;
 const SPEED_ICON_FRONT = 0.00;
 
@@ -4309,14 +4362,20 @@ function applySpeedReplacement(entry){
   part.gj=entry.ij*(active?1.3:1);part.kj=entry.lj*(active?1.3:1);
 
   if (active) {
+    // 1. Garante que o sprite esteja no mesmo container da cabeça
     const targetParent = owner.qa?.H || owner.qa || hudOf(owner)?.Xa;
     if (targetParent && sprite.parent !== targetParent) {
       targetParent.addChild(sprite);
     }
+    // 2. Puxa o ícone para TRÁS, sobre a cabeça (aumenta bastante o anchor.x)
+    //    O valor 0.45 puxa ele bem para trás, em cima da cabeça.
     sprite.anchor.set(entry.ax + 0.45 + SPEED_ICON_FRONT, entry.ay + SPEED_ICON_SIDE);
+    // 3. AUMENTA O TAMANHO: escala 2.2x maior
     sprite.scale.set(entry.scaleX * 2.5, entry.scaleY * 2.5);
+    // 4. Força o zIndex alto
     sprite.zIndex = 9999;
   } else {
+    // Restaura tudo ao original
     if (entry.originalParent && sprite.parent !== entry.originalParent) {
       entry.originalParent.addChild(sprite);
     }
@@ -4366,6 +4425,7 @@ function refreshMagnetReplacement(){
   const Texture=sample.texture.constructor;
   wormateMagnetLoading=new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>{try{
     const canvas=document.createElement('canvas');canvas.width=128;canvas.height=128;
+    // Isolate the red/blue wave from the shared Wormate ability atlas.
     canvas.getContext('2d').drawImage(img,170,98,58,100,27,0,74,128);
     wormateMagnetTexture=Texture.from(canvas);resolve();
   }catch(error){reject(error)}};img.onerror=reject;assetURL('green-speed.png').then(u=>{img.src=u;},reject);});
@@ -4383,6 +4443,7 @@ function bindMagnetReplacement(owner){
 }
 
 const curveIconRefs=new Set(),curveIconsBound=new WeakSet();
+// Golden/orange curve chevron used by Wormate Extensions (embedded, 54x44 PNG).
 const CUSTOM_CURVE_IMAGE='data:image/png;base64,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';
 let curveSpeedSyncStarted=false;
 function startCurveSpeedSync(){
@@ -4398,6 +4459,7 @@ function startCurveSpeedSync(){
         if(!entry||entry.icon.destroyed){curveIconRefs.delete(ref);continue;}
         const {icon,speed}=entry;
         if(!speed||speed.destroyed)continue;
+        // Mirror the live speed icon each frame: visibility and fade opacity.
         icon.visible=speed.visible!==false;
         icon.renderable=speed.renderable!==false;
         icon.alpha=speed.alpha;
@@ -4415,6 +4477,7 @@ function refreshCurveIcons(){
     const icon=entry.icon;
     icon.texture=custom&&customCurveTexture?customCurveTexture:entry.texture;
     if(!custom){
+      // Restore what the game controls natively (and undo the speed-mirroring).
       icon.visible=true;icon.alpha=entry.alpha;
       icon.renderable=extraPrefs.hideCurveIcon?false:entry.renderable;
     }
@@ -4427,10 +4490,13 @@ function refreshCurveIcons(){
   customCurveLoading.then(()=>{customCurveLoading=null;refreshCurveIcons();},e=>{customCurveLoading=null;console.warn('[Betterzilla] Custom curve icon failed to load.',e);});
 }
 function bindCurveIcon(owner){
+  // Native Lc uses flex_ability; $b (velocity) and ke (magnet) stay untouched.
   const icon=owner.qa?.H?.Mc?.o;
   const speed=owner.qa?.H?.$b?.o?.__wzgSpeedReplacement?.sprite||owner.qa?.H?.$b?.o;
   if(!icon||curveIconsBound.has(icon))return;
   curveIconsBound.add(icon);icon.__wzgCurveRenderable=icon.renderable;
+  // Keep a strong reference on the icon; otherwise the WeakRef entry can be
+  // collected immediately and the per-frame synchronization stops working.
   const entry={icon,speed,owner,renderable:icon.renderable,alpha:icon.alpha,texture:icon.texture};
   icon.__wzgCurveEntry=entry;
   trackWeak(curveIconRefs,entry,e=>e.icon.destroyed);
@@ -4455,8 +4521,22 @@ function bindRedHelper(owner){
 
   const segmentHookSyncs=[];
   const lightweightSegmentPrototypes=new WeakSet();
-  function bindLightweightBodies(owner){
-    const segment=owner.qa?.i?.[0];
+  // Body glow wave. Wormzilla: size = 1.5*s + 0.15*s*boost*sin(index*PI/10 - t) -> one long wave travelling down the body.
+  // Wormworld edited the spatial frequency to 3.14159 (PI): neighbouring segments pulse in opposite phase -> a fast ripple.
+  // We find the game's own wave function (its minified names change per build), check it is the original one, and swap it.
+  function installWormworldGlow(owner){
+    const visual=owner.qa;if(!visual||!visual.i||!visual.i[0])return;
+    const proto=Object.getPrototypeOf(visual);
+    if(!proto||proto.__wzgWwGlow||typeof proto.Ka!=='function')return;
+    const m=Function.prototype.toString.call(proto.Ka).match(/return\s+this\.([\w$]+)\s*\+\s*this\.([\w$]+)\s*\*\s*Math\.sin\(\s*([\d.]+)\s*\*\s*[\w$]+\s*-\s*this\.([\w$]+)\s*\)/);
+    if(!m||Math.abs(parseFloat(m[3])-Math.PI/10)>1e-3)return;
+    proto.__wzgWwGlow=true;
+    const native=proto.Ka,base=m[1],amp=m[2],phase=m[4];
+    const wormworld=function(h){return this[base]+this[amp]*Math.sin(h*3.14159-this[phase]);};
+    const sync=()=>{proto.Ka=extraPrefs.wormworldGlow?wormworld:native;};
+    segmentHookSyncs.push(sync);sync();
+  }
+  function bindLightweightBodies(owner){installWormworldGlow(owner);    const segment=owner.qa?.i?.[0];
     if(!segment?.J?.o || !segment?.id?.o)return;
     const proto=Object.getPrototypeOf(segment);
     if(lightweightSegmentPrototypes.has(proto)||typeof proto.ba!=='function')return;
@@ -4465,11 +4545,13 @@ function bindRedHelper(owner){
     const patched=function(x,y,size,glow,angle){
       if(!extraPrefs.antiLag)return original.call(this,x,y,size,glow,angle);
       this.J.Aa(true);this.J.Je(x,y);this.J.ib(size);(this.J.Ph||this.J.Qh).call(this.J,angle);
+      // Native id layer uses def_skin_glow. Keep the actual body untouched.
       if(this.id.yd())this.id.Aa(false);
     };
     const sync=()=>{proto.ba=extraPrefs.antiLag?patched:original;};segmentHookSyncs.push(sync);sync();
   }
 
+  // Bind the game's separate snake badge objects when they are created.
   const playerTagRefs = new Set();
   function updatePlayerTags() {
     for (const ref of playerTagRefs) {
@@ -4478,6 +4560,7 @@ function bindRedHelper(owner){
       entry.apply();
     }
   }
+  // CUSTOM_DATA now lives in custom (loaded by loadCustomData below). It is filled in place, so every reference keeps working.
   const CUSTOM_DATA = {textures:{},regions:{},skin:{},eyes:{},mouth:{},glasses:{},hat:{},glows:{},groups:[]};
   const customDefaults={enabled:false,skin:'original',eyes:'original',mouth:'original',glasses:'original',hat:'original'};
   const customPrefs=loadJSON('wzg-custom',customDefaults);
@@ -4494,7 +4577,7 @@ function bindRedHelper(owner){
   function customImage(key){
     if(customImages.has(key))return Promise.resolve(customImages.get(key));
     if(customLoads.has(key))return customLoads.get(key);
-    const promise=new Promise((resolve,reject)=>{const img=new Image();img.crossOrigin='anonymous';img.onload=()=>{customImages.set(key,img);resolve(img);};img.onerror=()=>reject(Error('Could not load the Wormate images. Check your connection and try again.'));img.src='https://resources.wormate.io'+CUSTOM_DATA.textures[key];});
+    const promise=(async()=>{const path=CUSTOM_DATA.textures[key];const src=path.startsWith('/')?'https://resources.wormate.io'+path:await assetURL(path);return new Promise((resolve,reject)=>{const img=new Image();img.crossOrigin='anonymous';img.onload=()=>{customImages.set(key,img);resolve(img);};img.onerror=()=>reject(Error('Could not load the Wormate images. Check your connection and try again.'));img.src=src;});})();
     customLoads.set(key,promise);promise.catch(()=>customLoads.delete(key));return promise;
   }
   function customAsset(id,sample){
@@ -4558,6 +4641,7 @@ function bindRedHelper(owner){
       refreshCustomEntries();customMessage(customEntries.size?'Custom look enabled.':'4.28.2: waiting for the game binding. Reload with only this version enabled.');
     }catch(e){customMessage('4.28.2: '+(e?.message||String(e)));}
   }
+  // ===== Custom skins/accessories data: loaded from custom (GitHub assets) =====
   const CUSTOM_DATA_FILE = 'custom';
   const CUSTOM_DATA_CACHE = 'wzg-custom-data-cache';
   let customDataReady = false;
@@ -4573,13 +4657,16 @@ function bindRedHelper(owner){
     return true;
   }
   function loadCustomData() {
+    // 1) cache: makes every load after the first one instant, same behaviour as when the data was embedded.
     let cached = null;
     try { cached = store.get(CUSTOM_DATA_CACHE); } catch {}
     if (cached) { try { applyCustomData(JSON.parse(cached)); } catch {} }
+    // 2) network: first run uses it directly; later runs just refresh the cache for the next load.
     assetText(CUSTOM_DATA_FILE).then(text => {
       const parsed = JSON.parse(text);
       if (!validCustomData(parsed)) throw Error('The custom data file has an invalid format.');
       const usedNow = applyCustomData(parsed);
+      if (!usedNow && customDataReady && text !== cached) { Object.assign(CUSTOM_DATA, parsed); sanitizeCustomPrefs(); }  // dados novos do repo valem sem precisar recarregar 2x
       try { store.set(CUSTOM_DATA_CACHE, text); } catch {}
       if (usedNow) {            // data arrived late: build the Custom tab and re-apply the look
         mountSettingsRedesign();
@@ -4590,25 +4677,36 @@ function bindRedHelper(owner){
     });
   }
   loadCustomData();
+  // O jogo remonta o visual da cobra por um metodo minificado que muda de nome entre builds ('dk' antes, 'ck' agora).
   function snakeInitMethod(owner){return typeof owner.dk==='function'?'dk':(typeof owner.ck==='function'?'ck':null);}
   function bindCustomSnake(owner){
     if(owner.B?.Ya!==owner.F?.G||!owner.qa||owner.qa.__wzgCustom)return;
     const visual=owner.qa;customOwner=bindCustomVisual(visual);
+    // Capture the native appearance through its existing initialization path.
     nativeTimeout(()=>{if(owner.qa!==visual||visual.Ba.destroyed)return;const initName=snakeInitMethod(owner);if(initName){owner[initName]();customRefresh();}else{customMessage('Game version not recognized: custom look binding unavailable.');}},0);
   }
-  function mountCustomSettings(modal){if(!customDataReady)return;
-    const tabs=modal.querySelector('#settings-tabs'),body=modal.querySelector('.settings-body');if(!tabs||!body||body.querySelector('#tab-custom'))return;
-    const tab=document.createElement('button');tab.type='button';tab.className='tab';tab.dataset.tab='custom';tab.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6h8a4 4 0 0 1 0 8H9a2 2 0 0 0 0 4h9M7 6a3 3 0 1 0 0 6h2"/><circle cx="5" cy="8" r=".7" fill="currentColor" stroke="none"/></svg><span>Wormate skins</span>';
-    const section=document.createElement('section');section.id='tab-custom';section.className='sectionS';
+  const CUSTOM_TABS={custom:{id:'custom',label:'Wormate skins',wearOnly:false,filter:k=>!k.startsWith('WW')},wormworld:{id:'wormworld',label:'Wormworld',wearOnly:true,filter:k=>k.startsWith('WW')}};
+  // As regras de CSS da aba usam #tab-custom; para as outras abas copiamos so as regras que citam esse id (CSS mobile global).
+  function cloneTabStyles(id){
+    if(id==='custom'||document.getElementById('wzg-tabstyle-'+id))return;
+    const src=document.getElementById('wzg-mobile-layout');if(!src||!src.sheet)return;
+    const collect=rules=>{let t='';for(const r of rules){if(r.type===1){if(r.selectorText.includes('#tab-custom'))t+=r.cssText;}else if(r.type===4){const inner=collect(r.cssRules);if(inner)t+='@media '+r.conditionText+'{'+inner+'}';}}return t;};
+    const css=collect(src.sheet.cssRules);if(!css)return;
+    const st=document.createElement('style');st.id='wzg-tabstyle-'+id;st.textContent=css.split('#tab-custom').join('#tab-'+id);document.head.appendChild(st);
+  }
+  function mountCustomSettings(modal,cfg){cfg=cfg||CUSTOM_TABS.custom;if(!customDataReady)return;
+    const tabs=modal.querySelector('#settings-tabs'),body=modal.querySelector('.settings-body');if(!tabs||!body||body.querySelector('#tab-'+cfg.id))return;
+    const tab=document.createElement('button');tab.type='button';tab.className='tab';tab.dataset.tab=cfg.id;tab.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6h8a4 4 0 0 1 0 8H9a2 2 0 0 0 0 4h9M7 6a3 3 0 1 0 0 6h2"/><circle cx="5" cy="8" r=".7" fill="currentColor" stroke="none"/></svg><span>'+cfg.label+'</span>';
+    const section=document.createElement('section');section.id='tab-'+cfg.id;section.className='sectionS';
     section.innerHTML=`<div class="wc-mode"><button type="button" data-mode="skin">Skins</button><button type="button" data-mode="wear">Clothing</button><label><input type="checkbox" role="switch" data-enabled> Apply custom look</label></div><div class="wc-panel"><header class="wc-header"><button type="button" data-back aria-label="Return to skins">❮</button><span data-title>Skins</span><span class="wc-local">4.28.2</span></header><div class="wc-clothing" role="tablist" aria-label="Accessories"></div><div class="wc-content"><div class="wc-stage"><canvas width="640" height="360" aria-label="Selected snake and accessories preview"></canvas><button type="button" class="wc-arrow wc-prev" aria-label="Previous item">❮<small>°◦</small></button><button type="button" class="wc-arrow wc-next" aria-label="Next item"><small>◦°</small>❯</button><span class="wc-item-name" data-select aria-live="polite"></span></div><aside class="wc-groups" aria-label="Skin categories"></aside></div></div><footer class="wc-footer"><button type="button" data-reset>Restore original</button><button type="button" data-retry>Retry images</button><span data-custom-status role="status"></span></footer>`;
-    tabs.append(tab);body.append(section);tab.onclick=()=>{modal.querySelectorAll('#settings-tabs .tab,.settings-body .sectionS').forEach(e=>e.classList.remove('active'));tab.classList.add('active');section.classList.add('active');};
-    let mode='skin',wear='eyes',group=null,revision=0;const select=section.querySelector('[data-select]'),canvas=section.querySelector('canvas'),ctx=canvas.getContext('2d'),enabled=section.querySelector('[data-enabled]');enabled.checked=customPrefs.enabled;
+    tabs.append(tab);body.append(section);tab.onclick=()=>{cloneTabStyles(cfg.id);modal.querySelectorAll('#settings-tabs .tab,.settings-body .sectionS').forEach(e=>e.classList.remove('active'));tab.classList.add('active');section.classList.add('active');};
+    let mode=cfg.wearOnly?'wear':'skin',wear='eyes',group=null,revision=0;const select=section.querySelector('[data-select]'),canvas=section.querySelector('canvas'),ctx=canvas.getContext('2d'),enabled=section.querySelector('[data-enabled]');enabled.checked=customPrefs.enabled;if(cfg.wearOnly){section.querySelectorAll('.wc-mode [data-mode]').forEach(b=>b.remove());section.querySelector('[data-back]').style.display='none';section.querySelector('.wc-groups').style.display='none';section.querySelector('.wc-content').style.gridTemplateColumns='minmax(0,1fr)';}
     const labels={eyes:'Eyes',mouth:'Mouth',glasses:'Glasses',hat:'Hats'};
     const art={eyes:'<ellipse cx="31" cy="27" rx="17" ry="19"/><ellipse cx="76" cy="27" rx="17" ry="19"/><circle cx="31" cy="32" r="10"/><circle cx="76" cy="32" r="10"/>',mouth:'<path d="M9 12 Q54 25 99 12 Q54 63 9 12Z"/>',glasses:'<circle cx="30" cy="29" r="17"/><circle cx="79" cy="29" r="17"/><path d="M47 25 Q54 19 62 25 M13 23 L6 19 M96 23 L103 19"/>',hat:'<path d="M13 35 Q54 45 97 35 L100 44 Q54 53 10 44Z M20 36 L26 17 Q54 33 82 17 L90 36"/><circle cx="29" cy="13" r="9"/><circle cx="80" cy="13" r="9"/>'};
     for(const key of Object.keys(labels)){const b=document.createElement('button');b.type='button';b.dataset.wear=key;b.setAttribute('role','tab');b.setAttribute('aria-label',labels[key]);b.innerHTML='<svg viewBox="0 0 110 58" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">'+art[key]+'</svg>';b.onclick=()=>{wear=key;sync();};section.querySelector('.wc-clothing').append(b);}
     const groups=section.querySelector('.wc-groups');for(const g of [{id:'all',name:'All skins'},...CUSTOM_DATA.groups]){const b=document.createElement('button');b.type='button';b.textContent=g.name;b.dataset.group=g.id;b.onclick=()=>{group=g.id==='all'?null:g;sync();};groups.append(b);}
     const key=()=>mode==='skin'?'skin':wear;
-    const list=()=>mode==='skin'?(group?group.ids:Object.keys(CUSTOM_DATA.skin)):Object.keys(CUSTOM_DATA[wear]);
+    const list=()=>mode==='skin'?(group?group.ids:Object.keys(CUSTOM_DATA.skin)):Object.keys(CUSTOM_DATA[wear]).filter(cfg.filter);
     function save(){store.set('wzg-custom',JSON.stringify(customPrefs));customRefresh();draw();}
     function choose(value){customPrefs[key()]=value;customPrefs.enabled=true;enabled.checked=true;save();sync(false);}
 
@@ -4616,7 +4714,7 @@ function bindRedHelper(owner){
     section.querySelector('.wc-prev').onclick=()=>step(-1);section.querySelector('.wc-next').onclick=()=>step(1);
     section.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;sync();});section.querySelector('[data-back]').onclick=()=>{mode='skin';sync();};
     enabled.onchange=()=>{customPrefs.enabled=enabled.checked;save();};section.querySelector('[data-reset]').onclick=()=>{Object.assign(customPrefs,customDefaults);enabled.checked=false;save();sync();};section.querySelector('[data-retry]').onclick=()=>{customRefresh();draw();};
-    function sync(redraw=true){section.dataset.mode=mode;section.querySelector('[data-title]').textContent=mode==='skin'?'Skins':'Clothing';section.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('selected',b.dataset.mode===mode));section.querySelectorAll('[data-wear]').forEach(b=>{b.classList.toggle('selected',b.dataset.wear===wear);b.setAttribute('aria-selected',String(b.dataset.wear===wear));});groups.querySelectorAll('button').forEach(b=>b.classList.toggle('selected',b.dataset.group===(group?.id||'all')));const value=customPrefs[key()];select.textContent=value==='original'?'Original':mode==='skin'?'SKIN '+value:(CUSTOM_DATA[wear][value].length?labels[wear]+' '+value:'None');if(redraw)draw();}
+    function sync(redraw=true){section.dataset.mode=mode;section.querySelector('[data-title]').textContent=mode==='skin'?'Skins':(cfg.wearOnly?cfg.label:'Clothing');section.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('selected',b.dataset.mode===mode));section.querySelectorAll('[data-wear]').forEach(b=>{b.classList.toggle('selected',b.dataset.wear===wear);b.setAttribute('aria-selected',String(b.dataset.wear===wear));});groups.querySelectorAll('button').forEach(b=>b.classList.toggle('selected',b.dataset.group===(group?.id||'all')));const value=customPrefs[key()];select.textContent=value==='original'?'Original':mode==='skin'?'SKIN '+value:(CUSTOM_DATA[wear][value].length?labels[wear]+' '+((CUSTOM_DATA.names&&CUSTOM_DATA.names[value])||value):'None');if(redraw)draw();}
     let paint=null,framePending=false,inView=false,lastPaint=-Infinity;
     function animate(time){framePending=false;if(!section.isConnected){visibility.disconnect();document.removeEventListener('visibilitychange',wake);return;}if(!inView||document.hidden||!paint)return;if(time-lastPaint>=1000/30){paint(time);lastPaint=time;}framePending=true;nativeRAF(animate);}
     function wake(){if(inView&&!document.hidden&&paint&&!framePending){framePending=true;nativeRAF(animate);}}
@@ -4631,7 +4729,7 @@ function bindRedHelper(owner){
         if(!skin){ctx.fillStyle='#92929f';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.fillText('Neutral preview · original game skin unchanged',320,280);}
       };paint(performance.now());wake();
     }catch(e){if(rev===revision)customMessage(e.message);}}
-    const style=document.createElement('style');style.textContent="#tab-custom.active{display:block!important;width:100%!important}#tab-custom{font-family:Arial,sans-serif;color:#fff}#tab-custom *{box-sizing:border-box}#tab-custom button{font:inherit;cursor:pointer;color:#fff;box-shadow:none}#tab-custom .wc-mode{display:flex;align-items:center;gap:8px;margin:0 0 14px}#tab-custom .wc-mode button,#tab-custom .wc-footer button{padding:8px 16px;background:#29334b;border:1px solid #596681;border-radius:5px;color:#fff!important}#tab-custom .wc-mode button.selected{background:#1e9faf}#tab-custom .wc-mode label{margin-left:auto;font-size:12px;display:flex;align-items:center;gap:8px}#tab-custom input{accent-color:#26c6da}#tab-custom .wc-panel{background-color:#20263f;background-image:linear-gradient(60deg,transparent 49.8%,#35406455 50%,transparent 50.2%),linear-gradient(-60deg,transparent 49.8%,#35406455 50%,transparent 50.2%);background-size:180px 310px;border-radius:4px;min-height:460px;overflow:hidden}#tab-custom .wc-header{height:42px;display:flex;align-items:center;background:#2c3851b8;position:relative;padding:0 10px}#tab-custom .wc-header>span[data-title]{position:absolute;left:50%;transform:translateX(-50%);font-size:22px;font-weight:400}#tab-custom .wc-header button{width:28px;height:28px;border:0;border-radius:50%;background:#ffa519;color:#294052!important;font-size:23px;line-height:25px;padding:0}#tab-custom .wc-local{margin-left:auto;color:#9aabc7;font-size:10px;letter-spacing:2px}#tab-custom .wc-content{display:grid;grid-template-columns:minmax(0,1fr) 190px;gap:12px;padding:18px 12px 12px;min-height:410px}#tab-custom .wc-stage{position:relative;min-width:0;display:flex;flex-direction:column;justify-content:center;align-items:center;min-height:355px}#tab-custom canvas{display:block;width:100%;height:auto;max-height:330px;object-fit:contain}#tab-custom .wc-arrow{position:absolute;top:45%;transform:translateY(-50%);border:0;background:none!important;color:#ff9f12!important;font-size:40px;line-height:1;padding:0;display:flex;align-items:center;gap:3px}#tab-custom .wc-arrow small{font-size:17px}#tab-custom .wc-prev{left:3px}#tab-custom .wc-next{right:3px}#tab-custom .wc-stage select{background:transparent;color:#fff;border:0;max-width:90%;font:14px Arial,sans-serif;text-align:center;padding:8px;margin:0 auto 24px;cursor:pointer}#tab-custom .wc-stage option{background:#20263f;color:#fff}#tab-custom .wc-groups{padding:8px;background:#0005;border-radius:4px;max-height:386px;overflow-y:auto;display:flex;flex-direction:column;gap:9px}#tab-custom .wc-groups button{background:#26c6da;color:#fff!important;flex-shrink:0;height:38px;font-size:18px;padding:0 6px;border:0;border-radius:4px}#tab-custom .wc-groups button:hover{background:#52d1e1}#tab-custom .wc-groups button.selected{background:#1e9faf;outline:1px solid #adf5ff}#tab-custom .wc-clothing{display:none;padding:18px 18px 0;gap:12px}#tab-custom[data-mode=wear] .wc-clothing{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}#tab-custom[data-mode=wear] .wc-groups{display:none}#tab-custom[data-mode=wear] .wc-content{grid-template-columns:1fr;min-height:338px;padding-top:0}#tab-custom[data-mode=wear] .wc-stage{min-height:300px;justify-content:flex-start}#tab-custom[data-mode=wear] canvas{max-height:285px}#tab-custom .wc-clothing button{height:48px;border:0;border-radius:4px;padding:0;color:#fff!important}#tab-custom .wc-clothing svg{width:100px;height:45px;max-width:90%;vertical-align:middle}#tab-custom [data-wear=eyes]{background:#f7941d}#tab-custom [data-wear=mouth]{background:#ffee37}#tab-custom [data-wear=glasses]{background:#8bc541}#tab-custom [data-wear=hat]{background:#48c9d9}#tab-custom .wc-clothing button.selected{filter:brightness(.75)}#tab-custom .wc-footer{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:14px 0}#tab-custom [data-custom-status]{font-size:12px;color:#afb8cc}#tab-custom button:focus-visible,#tab-custom select:focus-visible{outline:2px solid white;outline-offset:3px}@media(max-width:620px){#tab-custom .wc-content{grid-template-columns:minmax(0,1fr) 125px}#tab-custom .wc-groups button{font-size:14px}#tab-custom .wc-mode{flex-wrap:wrap}#tab-custom .wc-mode label{margin-left:0}#tab-custom .wc-clothing{gap:6px;padding:12px 8px 0}#tab-custom .wc-arrow{font-size:28px}#tab-custom .wc-stage{min-height:285px}#tab-custom .wc-panel{min-height:400px}}\r\n";style.textContent+="html.wzg-ready #settings-tabs{flex-flow:column nowrap!important;overflow-x:hidden!important;overflow-y:auto!important;align-content:normal!important;scrollbar-width:thin;overscroll-behavior:contain}html.wzg-ready #settings-tabs .tab{flex:0 0 auto!important;max-width:100%!important;white-space:normal!important}html.wzg-ready #settings-tabs::before{flex-shrink:0!important}html.wzg-ready .settings-body{max-width:100%!important;overflow-x:hidden!important;overflow-y:auto!important}html.wzg-ready #tab-custom{min-width:0!important;max-width:100%!important}#tab-custom .wc-panel,#tab-custom .wc-content,#tab-custom .wc-stage{min-width:0;max-width:100%}#tab-custom .wc-mode{flex-wrap:wrap}#tab-custom .wc-stage canvas{aspect-ratio:16/9}";style.textContent+="#tab-custom .wc-item-name{display:block;color:#fff;font:14px Arial,sans-serif;text-align:center;margin:0 auto 24px;padding:8px;max-width:90%}";style.textContent+="#tab-custom{font-family:inherit}#tab-custom .wc-mode{gap:6px;padding:6px;border:1px solid #ffffff12;border-radius:14px;background:#ffffff03;margin-bottom:16px}#tab-custom .wc-mode button{border:1px solid transparent;background:transparent;color:#a4a4b0!important;border-radius:10px;padding:10px 20px;font-size:12px;font-weight:600}#tab-custom .wc-mode button.selected{background:#ffffff12;color:#f1f1f5!important;border-color:#ffffff15;box-shadow:inset 0 1px #ffffff0a}#tab-custom .wc-mode label{padding:0 12px;color:#a5a5b1;gap:10px}#tab-custom .wc-mode input{appearance:none;width:32px;height:19px;border-radius:20px;background:#323238;position:relative;cursor:pointer;border:1px solid #ffffff20;margin:0}#tab-custom .wc-mode input:after{content:'';position:absolute;width:11px;height:11px;left:3px;top:3px;background:#90909b;border-radius:50%;transition:transform .15s}#tab-custom .wc-mode input:checked{background:#62626e}#tab-custom .wc-mode input:checked:after{transform:translateX(13px);background:white}#tab-custom .wc-panel{background:radial-gradient(ellipse at 30% 25%,#ffffff05,transparent 65%),linear-gradient(135deg,#ffffff04,#ffffff01)!important;border:1px solid #ffffff12;border-radius:18px;backdrop-filter:blur(20px);box-shadow:inset 0 1px #ffffff07,0 16px 40px #0002;min-height:410px}#tab-custom .wc-header{background:transparent;border-bottom:1px solid #ffffff0b;height:48px;padding:0 18px}#tab-custom .wc-header>span[data-title]{font-size:14px;font-weight:600;letter-spacing:.02em;color:#e4e4ec}#tab-custom .wc-header button{background:#ffffff06;border:1px solid #ffffff15;color:#bbbcc6!important;font-size:17px;border-radius:8px}#tab-custom .wc-local{color:#757580;font-size:9px}#tab-custom .wc-content{padding:16px;gap:18px;grid-template-columns:minmax(0,1fr) 166px;min-height:355px}#tab-custom .wc-groups{background:#00000016;border:1px solid #ffffff09;border-radius:12px;gap:5px;padding:7px;max-height:345px;scrollbar-width:thin;scrollbar-color:#ffffff25 transparent}#tab-custom .wc-groups button{background:transparent;color:#9696a4!important;border:1px solid transparent;border-radius:8px;font-size:12px;text-align:left;padding:0 12px;height:34px;transition:background .15s}#tab-custom .wc-groups button:hover{background:#ffffff06;color:#e1e1e8!important}#tab-custom .wc-groups button.selected{background:#ffffff0c;border-color:#ffffff14;color:#f1f1f6!important;outline:none}#tab-custom .wc-stage{min-height:320px}#tab-custom .wc-arrow{border:1px solid #ffffff16;background:#ffffff03!important;color:#b1b1bd!important;border-radius:10px;width:34px;height:38px;font-size:20px;justify-content:center}#tab-custom .wc-arrow:hover{background:#ffffff0e!important;color:white!important}#tab-custom .wc-arrow small{display:none}#tab-custom .wc-clothing{gap:10px}#tab-custom .wc-clothing button{background:#ffffff03!important;border:1px solid #ffffff12;border-radius:11px;height:50px;color:#a6a6b3!important}#tab-custom .wc-clothing button.selected{filter:none;background:#ffffff0d!important;border-color:#ffffff30;color:#eeeef4!important}#tab-custom .wc-clothing svg{height:34px}#tab-custom .wc-item-name{color:#9595a4;font-size:11px;letter-spacing:.08em}#tab-custom .wc-footer button{background:transparent;border:1px solid #ffffff13;color:#91919f!important;font-size:11px;border-radius:8px;padding:8px 12px}#tab-custom .wc-footer button:hover{background:#ffffff06;color:#eee!important}#tab-custom [data-custom-status]{color:#81818e;font-size:11px}@media(max-width:620px){#tab-custom .wc-content{grid-template-columns:minmax(0,1fr) 115px;gap:8px;padding:10px}#tab-custom .wc-groups button{font-size:11px;padding:0 8px}#tab-custom .wc-mode label{padding:8px}#tab-custom .wc-stage{min-height:270px}}";section.append(style);sync();customMessage(customStatus||'Choose a skin or accessory to apply it.');
+    const style=document.createElement('style');style.textContent="#tab-custom.active{display:block!important;width:100%!important}#tab-custom{font-family:Arial,sans-serif;color:#fff}#tab-custom *{box-sizing:border-box}#tab-custom button{font:inherit;cursor:pointer;color:#fff;box-shadow:none}#tab-custom .wc-mode{display:flex;align-items:center;gap:8px;margin:0 0 14px}#tab-custom .wc-mode button,#tab-custom .wc-footer button{padding:8px 16px;background:#29334b;border:1px solid #596681;border-radius:5px;color:#fff!important}#tab-custom .wc-mode button.selected{background:#1e9faf}#tab-custom .wc-mode label{margin-left:auto;font-size:12px;display:flex;align-items:center;gap:8px}#tab-custom input{accent-color:#26c6da}#tab-custom .wc-panel{background-color:#20263f;background-image:linear-gradient(60deg,transparent 49.8%,#35406455 50%,transparent 50.2%),linear-gradient(-60deg,transparent 49.8%,#35406455 50%,transparent 50.2%);background-size:180px 310px;border-radius:4px;min-height:460px;overflow:hidden}#tab-custom .wc-header{height:42px;display:flex;align-items:center;background:#2c3851b8;position:relative;padding:0 10px}#tab-custom .wc-header>span[data-title]{position:absolute;left:50%;transform:translateX(-50%);font-size:22px;font-weight:400}#tab-custom .wc-header button{width:28px;height:28px;border:0;border-radius:50%;background:#ffa519;color:#294052!important;font-size:23px;line-height:25px;padding:0}#tab-custom .wc-local{margin-left:auto;color:#9aabc7;font-size:10px;letter-spacing:2px}#tab-custom .wc-content{display:grid;grid-template-columns:minmax(0,1fr) 190px;gap:12px;padding:18px 12px 12px;min-height:410px}#tab-custom .wc-stage{position:relative;min-width:0;display:flex;flex-direction:column;justify-content:center;align-items:center;min-height:355px}#tab-custom canvas{display:block;width:100%;height:auto;max-height:330px;object-fit:contain}#tab-custom .wc-arrow{position:absolute;top:45%;transform:translateY(-50%);border:0;background:none!important;color:#ff9f12!important;font-size:40px;line-height:1;padding:0;display:flex;align-items:center;gap:3px}#tab-custom .wc-arrow small{font-size:17px}#tab-custom .wc-prev{left:3px}#tab-custom .wc-next{right:3px}#tab-custom .wc-stage select{background:transparent;color:#fff;border:0;max-width:90%;font:14px Arial,sans-serif;text-align:center;padding:8px;margin:0 auto 24px;cursor:pointer}#tab-custom .wc-stage option{background:#20263f;color:#fff}#tab-custom .wc-groups{padding:8px;background:#0005;border-radius:4px;max-height:386px;overflow-y:auto;display:flex;flex-direction:column;gap:9px}#tab-custom .wc-groups button{background:#26c6da;color:#fff!important;flex-shrink:0;height:38px;font-size:18px;padding:0 6px;border:0;border-radius:4px}#tab-custom .wc-groups button:hover{background:#52d1e1}#tab-custom .wc-groups button.selected{background:#1e9faf;outline:1px solid #adf5ff}#tab-custom .wc-clothing{display:none;padding:18px 18px 0;gap:12px}#tab-custom[data-mode=wear] .wc-clothing{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}#tab-custom[data-mode=wear] .wc-groups{display:none}#tab-custom[data-mode=wear] .wc-content{grid-template-columns:1fr;min-height:338px;padding-top:0}#tab-custom[data-mode=wear] .wc-stage{min-height:300px;justify-content:flex-start}#tab-custom[data-mode=wear] canvas{max-height:285px}#tab-custom .wc-clothing button{height:48px;border:0;border-radius:4px;padding:0;color:#fff!important}#tab-custom .wc-clothing svg{width:100px;height:45px;max-width:90%;vertical-align:middle}#tab-custom [data-wear=eyes]{background:#f7941d}#tab-custom [data-wear=mouth]{background:#ffee37}#tab-custom [data-wear=glasses]{background:#8bc541}#tab-custom [data-wear=hat]{background:#48c9d9}#tab-custom .wc-clothing button.selected{filter:brightness(.75)}#tab-custom .wc-footer{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:14px 0}#tab-custom [data-custom-status]{font-size:12px;color:#afb8cc}#tab-custom button:focus-visible,#tab-custom select:focus-visible{outline:2px solid white;outline-offset:3px}@media(max-width:620px){#tab-custom .wc-content{grid-template-columns:minmax(0,1fr) 125px}#tab-custom .wc-groups button{font-size:14px}#tab-custom .wc-mode{flex-wrap:wrap}#tab-custom .wc-mode label{margin-left:0}#tab-custom .wc-clothing{gap:6px;padding:12px 8px 0}#tab-custom .wc-arrow{font-size:28px}#tab-custom .wc-stage{min-height:285px}#tab-custom .wc-panel{min-height:400px}}\r\n";style.textContent+="html.wzg-ready #settings-tabs{flex-flow:column nowrap!important;overflow-x:hidden!important;overflow-y:auto!important;align-content:normal!important;scrollbar-width:thin;overscroll-behavior:contain}html.wzg-ready #settings-tabs .tab{flex:0 0 auto!important;max-width:100%!important;white-space:normal!important}html.wzg-ready #settings-tabs::before{flex-shrink:0!important}html.wzg-ready .settings-body{max-width:100%!important;overflow-x:hidden!important;overflow-y:auto!important}html.wzg-ready #tab-custom{min-width:0!important;max-width:100%!important}#tab-custom .wc-panel,#tab-custom .wc-content,#tab-custom .wc-stage{min-width:0;max-width:100%}#tab-custom .wc-mode{flex-wrap:wrap}#tab-custom .wc-stage canvas{aspect-ratio:16/9}";style.textContent+="#tab-custom .wc-item-name{display:block;color:#fff;font:14px Arial,sans-serif;text-align:center;margin:0 auto 24px;padding:8px;max-width:90%}";style.textContent+="#tab-custom{font-family:inherit}#tab-custom .wc-mode{gap:6px;padding:6px;border:1px solid #ffffff12;border-radius:14px;background:#ffffff03;margin-bottom:16px}#tab-custom .wc-mode button{border:1px solid transparent;background:transparent;color:#a4a4b0!important;border-radius:10px;padding:10px 20px;font-size:12px;font-weight:600}#tab-custom .wc-mode button.selected{background:#ffffff12;color:#f1f1f5!important;border-color:#ffffff15;box-shadow:inset 0 1px #ffffff0a}#tab-custom .wc-mode label{padding:0 12px;color:#a5a5b1;gap:10px}#tab-custom .wc-mode input{appearance:none;width:32px;height:19px;border-radius:20px;background:#323238;position:relative;cursor:pointer;border:1px solid #ffffff20;margin:0}#tab-custom .wc-mode input:after{content:'';position:absolute;width:11px;height:11px;left:3px;top:3px;background:#90909b;border-radius:50%;transition:transform .15s}#tab-custom .wc-mode input:checked{background:#62626e}#tab-custom .wc-mode input:checked:after{transform:translateX(13px);background:white}#tab-custom .wc-panel{background:radial-gradient(ellipse at 30% 25%,#ffffff05,transparent 65%),linear-gradient(135deg,#ffffff04,#ffffff01)!important;border:1px solid #ffffff12;border-radius:18px;backdrop-filter:blur(20px);box-shadow:inset 0 1px #ffffff07,0 16px 40px #0002;min-height:410px}#tab-custom .wc-header{background:transparent;border-bottom:1px solid #ffffff0b;height:48px;padding:0 18px}#tab-custom .wc-header>span[data-title]{font-size:14px;font-weight:600;letter-spacing:.02em;color:#e4e4ec}#tab-custom .wc-header button{background:#ffffff06;border:1px solid #ffffff15;color:#bbbcc6!important;font-size:17px;border-radius:8px}#tab-custom .wc-local{color:#757580;font-size:9px}#tab-custom .wc-content{padding:16px;gap:18px;grid-template-columns:minmax(0,1fr) 166px;min-height:355px}#tab-custom .wc-groups{background:#00000016;border:1px solid #ffffff09;border-radius:12px;gap:5px;padding:7px;max-height:345px;scrollbar-width:thin;scrollbar-color:#ffffff25 transparent}#tab-custom .wc-groups button{background:transparent;color:#9696a4!important;border:1px solid transparent;border-radius:8px;font-size:12px;text-align:left;padding:0 12px;height:34px;transition:background .15s}#tab-custom .wc-groups button:hover{background:#ffffff06;color:#e1e1e8!important}#tab-custom .wc-groups button.selected{background:#ffffff0c;border-color:#ffffff14;color:#f1f1f6!important;outline:none}#tab-custom .wc-stage{min-height:320px}#tab-custom .wc-arrow{border:1px solid #ffffff16;background:#ffffff03!important;color:#b1b1bd!important;border-radius:10px;width:34px;height:38px;font-size:20px;justify-content:center}#tab-custom .wc-arrow:hover{background:#ffffff0e!important;color:white!important}#tab-custom .wc-arrow small{display:none}#tab-custom .wc-clothing{gap:10px}#tab-custom .wc-clothing button{background:#ffffff03!important;border:1px solid #ffffff12;border-radius:11px;height:50px;color:#a6a6b3!important}#tab-custom .wc-clothing button.selected{filter:none;background:#ffffff0d!important;border-color:#ffffff30;color:#eeeef4!important}#tab-custom .wc-clothing svg{height:34px}#tab-custom .wc-item-name{color:#9595a4;font-size:11px;letter-spacing:.08em}#tab-custom .wc-footer button{background:transparent;border:1px solid #ffffff13;color:#91919f!important;font-size:11px;border-radius:8px;padding:8px 12px}#tab-custom .wc-footer button:hover{background:#ffffff06;color:#eee!important}#tab-custom [data-custom-status]{color:#81818e;font-size:11px}@media(max-width:620px){#tab-custom .wc-content{grid-template-columns:minmax(0,1fr) 115px;gap:8px;padding:10px}#tab-custom .wc-groups button{font-size:11px;padding:0 8px}#tab-custom .wc-mode label{padding:8px}#tab-custom .wc-stage{min-height:270px}}";style.textContent=style.textContent.split('#tab-custom').join('#tab-'+cfg.id);cloneTabStyles(cfg.id);section.append(style);sync();customMessage(customStatus||'Choose a skin or accessory to apply it.');
   }
 
   const wormateMapBound=new WeakSet();
@@ -4650,8 +4748,10 @@ function bindRedHelper(owner){
     map.children.forEach(replace);const add=map.addChild;map.addChild=function(...children){const result=add.apply(this,children);children.forEach(replace);return result;};
   }
 
+  // The native touch zoom slider stays hidden (the mobile toolbar has its own zoom buttons).
   const zoomSliderControllers=new WeakSet();
 
+  // ===== Barra lateral configuravel (botoes, ordem, zoom por botoes ou slider) =====
   const TOOLBAR_ALIAS = { settingicon: 'move', mobilsos: 'sos', 'otoskın': 'afk', mobilereload: 'reload', unzoom: 'zoomout', zoom: 'zoomin' };
   const TOOLBAR_DEFAULT_ORDER = ['zoomin', 'zoomout', 'reload', 'afk', 'sos']; // de cima pra baixo, como na barra vertical
   let tbCfgRaw = null, tbCfgCache = null;
@@ -4679,6 +4779,7 @@ function bindRedHelper(owner){
       node.visible = show;
       node.eventMode = show ? node.__wzgEM : 'none';
       if (show) {
+        // visual "glass": translucente pra nao atrapalhar a visao; tamanho ajustavel
         node.alpha = cfg.sliderOpacity / 100;
         node.scale?.set(node.__wzgS0[0] * cfg.sliderSize / 100, node.__wzgS0[1] * cfg.sliderSize / 100);
       }
@@ -4693,6 +4794,7 @@ function bindRedHelper(owner){
     root.children?.forEach(inspectAdded);const add=root.addChild;root.addChild=function(...nodes){const result=add.apply(this,nodes);nodes.forEach(inspectAdded);return result;};
   }
 
+  // Visual alias: only render objects are changed, never player/network data.
   const visualNamePrefs=loadJSON('wzg-visual-name',{enabled:false,name:''});
   const visualNameHeads=new Set();
   function visualAlias(){return visualNamePrefs.enabled?String(visualNamePrefs.name||'').trim().slice(0,32):'';}
@@ -4806,6 +4908,7 @@ function bindRedHelper(owner){
   function finishHudMove(event){const d=hudMoveDrag;if(!d||event.pointerId!==d.id)return;event.stopImmediatePropagation();hudPositions[d.key]={x:d.node.x/PAGE.innerWidth,y:d.node.y/PAGE.innerHeight};store.set('wzg-hud-positions',JSON.stringify(hudPositions));hudMoveDrag=null;}
   PAGE.addEventListener('pointerup',finishHudMove,true);PAGE.addEventListener('pointercancel',finishHudMove,true);
 
+  // ===== Medicao do HUD real (aprende tamanhos e posicoes padrao durante a partida) =====
   const hudMeasure = loadJSON('wzg-hud-measure', { mobile: {}, desktop: {} });
   let hudMeasureDirty = false, hudMeasureSaved = 0, hudMeasureStable = 0, hudMeasureSig = '';
   function contentBounds(node) {
@@ -4829,6 +4932,7 @@ function bindRedHelper(owner){
       const nodes = movableHudNodes(); if (!nodes.length) return;
       bzSignal('hud');
       const w = PAGE.innerWidth, h = PAGE.innerHeight, mode = mobileHudActive() ? 'mobile' : 'desktop';
+      // ja estabilizou: so volta a medir se a tela ou o conjunto de pecas mudar
       const sig = mode + w + 'x' + h + ':' + nodes.map(n => n[0]).join(',');
       if (sig !== hudMeasureSig) { hudMeasureSig = sig; hudMeasureStable = 0; }
       if (hudMeasureStable >= 12) return;
@@ -4838,6 +4942,7 @@ function bindRedHelper(owner){
         const b = node.getBounds?.(); if (!b) continue;
         let l = b.minX ?? b.x, t = b.minY ?? b.y, r = b.maxX ?? (b.x + b.width), bt = b.maxY ?? (b.y + b.height), v;
         if (key === 'hs' || key === 'records' || key === 'ranking') {
+          // listas: mede so o texto visivel (os bounds do no incluem folga/linhas vazias e inflavam o bloco)
           const cb = contentBounds(node);
           if (cb && cb.count >= 3) { l = cb.l; t = cb.t; r = cb.r; bt = cb.b; v = 2; }
         }
@@ -4845,6 +4950,7 @@ function bindRedHelper(owner){
         let bw = Math.round(r - l), bh = Math.round(bt - t);
         if (bw < 8 || bh < 8 || bw > w || bh > h) continue;
         const prev = bucket[key] || {};
+        // listas (HS/Records/Top 10) so crescem: medir com as linhas ainda vazias nao pode encolher o bloco
         if (!v && prev.bw && (key === 'hs' || key === 'records' || key === 'ranking')) { bw = Math.max(bw, prev.bw); bh = Math.max(bh, prev.bh); }
         const next = { ox: Math.round(node.x - l), oy: Math.round(node.y - t), bw, bh, v, nx: prev.nx, ny: prev.ny };
         if (!hudPositions[key]) { next.nx = +(node.x / w).toFixed(4); next.ny = +(node.y / h).toFixed(4); }
@@ -4858,6 +4964,9 @@ function bindRedHelper(owner){
   }
   nativeInterval(measureHud, 2000);
 
+  // ===== Editor de HUD fora da partida =====
+  // Grava em 'wzg-hud-positions' no MESMO formato do modo de mover in-game (fracao da tela, origem do no),
+  // entao a partida aplica via restoreHudPositions(). Tamanhos/posicoes padrao vem da medicao acima.
   let hudEditorSliderSize = 100;
   const HUD_EDITOR_ITEMS = [
     { key: 'map',        label: 'Minimap + HS/KILL', kind: 'map',    est: (u, r, w, h, mob) => mob ? ({ bw: 100*u, bh: 112*u, ox: 40*u, oy: 40*u, dx: 60*u, dy: 60*u }) : ({ bw: 100, bh: 128, ox: 40, oy: 40, dx: 60, dy: 57 }) },
@@ -4884,9 +4993,12 @@ function bindRedHelper(owner){
   function hudGeom(item, m, work) {
     const mob = mobileHudActive(), me0 = hudMeasure[mob ? 'mobile' : 'desktop']?.[item.key], me = me0 && item.kind !== 'rows' && item.kind !== 'slider' ? me0 : null;
     const est = item.est(m.u, m.r, m.w, m.h, mob), list = item.kind === 'rows';
+    // Sem partida jogada o editor ja abre com tamanhos/posicoes realistas (est). A medicao so refina:
+    // listas nunca ficam menores que o estimado (medir com linhas vazias dava blocos minusculos)
     const bw = me ? me.bw : est.bw, bh = me ? me.bh : est.bh;
     const ox = me ? me.ox : est.ox, oy = me ? me.oy : est.oy;
     const saved = work[item.key];
+    // posicao padrao medida so vale se for plausivel (Top 10 mora na metade direita da tela)
     const okPos = me && me.nx != null && ['map', 'control'].includes(item.key);
     let x, y;
     if (saved) { x = saved.x * m.w; y = saved.y * m.h; }
@@ -5145,15 +5257,20 @@ buttons.forEach(b=>{const on=shown.includes(b);if(b.__wzgEM===undefined)b.__wzgE
       else if(vertical)bar.position.set(dock==='left'?0:w-bw,Math.max(reserved,Math.min(h-bh,(h-bh)*fraction)));
       else bar.position.set(Math.max(0,Math.min(w-bw,bar.x)),Math.max(0,Math.min(h-bh,bar.y)));
       backing.alpha=editing?1:.85;gear.tint=editing?0x9fd9ff:0xffffff;gear.alpha=1;backing.cursor=editing?'grab':'default';
+      // Durante a animacao de encaixe o destino so e atualizado; a posicao quem manda e a animacao.
       if(anim){anim.tx=bar.x;anim.ty=bar.y;bar.position.set(anim.cx,anim.cy);}
+      // Guarda o ultimo lugar em que a barra estava inteira na tela.
       else if(!drag&&onScreen())good={dock,fraction,x:bar.x,y:bar.y};
     }
+    // Animacao de encaixe: ao soltar perto de uma borda, a barra desliza ate ela em vez de pular seco.
+    // Barra inteira dentro da tela? (com folga de 4px)
     function onScreen(){
       const {w,h}=viewport(),vertical=dock==='left'||dock==='right';
       const bw=(vertical?62:barLen)*bar.scale.x,bh=(vertical?barLen:62)*bar.scale.y;
       return [bar.x,bar.y,bw,bh,w,h].every(Number.isFinite)&&bar.x>=-4&&bar.y>=-4&&bar.x+bw<=w+4&&bar.y+bh<=h+4;
     }
     function tryDock(c){dock=c.dock;fraction=c.fraction;if(c.dock==='free')bar.position.set(c.x,c.y);layout();return onScreen();}
+    // Tenta voltar pro lugar de antes, depois pro ultimo lugar bom; o topo e o ultimo recurso.
     function recover(prev){for(const c of [prev,good,{dock:'top',fraction:.5}])if(c&&tryDock(c))return true;return false;}
     const DOCK_ANIM_MS=750;
     function cancelDockAnim(){anim=null;}
@@ -5162,6 +5279,7 @@ buttons.forEach(b=>{const on=shown.includes(b);if(b.__wzgEM===undefined)b.__wzgE
       bar.position.set(fx,fy);
       const step=now=>{
         if(anim!==mine||bar.destroyed)return;
+        // Recalcula escala e destino todo frame: as medidas do HUD ainda mudam logo apos soltar.
         layout();
         const p=Math.max(0,Math.min(1,(now-mine.t0)/DOCK_ANIM_MS)),e=p<.5?4*p*p*p:1-Math.pow(-2*p+2,3)/2;
         mine.cx=mine.fx+(mine.tx-mine.fx)*e;mine.cy=mine.fy+(mine.ty-mine.fy)*e;
@@ -5171,6 +5289,7 @@ buttons.forEach(b=>{const on=shown.includes(b);if(b.__wzgEM===undefined)b.__wzgE
       };
       nativeRAF(step);
     }
+    // The extension now owns HUD dragging; do not also enable native dragging.
     gear.removeAllListeners('pointerdown');
     gear.on('pointerdown',e=>{editing=!editing;hudMoveEnabled=editing;layout();e.stopPropagation();});
     function start(e){if(!editing||e.target===gear)return;e.stopPropagation();
@@ -5179,6 +5298,7 @@ buttons.forEach(b=>{const on=shown.includes(b);if(b.__wzgEM===undefined)b.__wzgE
       native.target?.setPointerCapture?.(native.pointerId);backing.cursor='grabbing';
     }
     backing.on('pointerdown',start);
+    // While editing, pressing a button starts a drag instead of activating it.
     for(const button of buttons.slice(1)){const handlers=button.listeners('pointerdown');button.removeAllListeners('pointerdown');button.on('pointerdown',function(e){if(editing)start(e);else for(const fn of handlers)fn.call(this,e);});}
     function move(e){if(!drag||e.pointerId!==drag.id)return;e.preventDefault();
       const {sx,sy}=viewport();bar.position.set(drag.bx+(e.clientX-drag.x)*sx,drag.by+(e.clientY-drag.y)*sy);
@@ -5188,6 +5308,7 @@ buttons.forEach(b=>{const on=shown.includes(b);if(b.__wzgEM===undefined)b.__wzgE
       const edges=[['left',px],['right',w-px],['top',py],['bottom',h-py]].sort((a,b)=>a[1]-b[1]);
       const prev={dock,fraction,x:drag.bx,y:drag.by};
       const fx=bar.x,fy=bar.y;dock=edges[0][1]<85?edges[0][0]:'free';fraction=Math.max(0,Math.min(1,(dock==='left'||dock==='right')?py/h:px/w));drag=null;layout();
+      // Se o novo lugar joga a barra pra fora da tela, volta pro lugar de antes e so entao anima.
       let recovered=false;
       if(!onScreen()){recovered=true;recover(prev);}
       if((dock!=='free'||recovered)&&(Math.abs(bar.x-fx)>1||Math.abs(bar.y-fy)>1))startDockAnim(fx,fy,bar.x,bar.y);
@@ -5198,6 +5319,7 @@ buttons.forEach(b=>{const on=shown.includes(b);if(b.__wzgEM===undefined)b.__wzgE
     PAGE.addEventListener('resize',layout);
     const dockLayoutTimer=PAGE.setInterval(()=>{if(!bar.destroyed&&!document.hidden){restoreHudPositions();layout();if(!anim&&!drag&&!onScreen())recover(null);}},1500);
     bar.on('destroyed',()=>{PAGE.clearInterval(dockLayoutTimer);PAGE.removeEventListener('pointermove',move);PAGE.removeEventListener('pointerup',end);PAGE.removeEventListener('pointercancel',end);PAGE.removeEventListener('resize',layout);for(const tex of textures.values())tex.destroy(true);});
+    // Native resize otherwise puts this toolbar back at its old horizontal offset.
     if(bar.cc)bar.cc['1c']=true;
     nativeTimeout(layout,0);
   }
@@ -5215,6 +5337,7 @@ buttons.forEach(b=>{const on=shown.includes(b);if(b.__wzgEM===undefined)b.__wzgE
     const scan=()=>{if(!controller.ea.destroyed)inspectGameHUD(controller.ea);};
     if(directHudControllers.has(controller)){scan();return;}
     directHudControllers.add(controller);
+    // Bind existing nodes, then any asynchronously added HUD children.
     scan();
     const add=controller.ea.addChild;
     controller.ea.addChild=function(...nodes){const result=add.apply(this,nodes);scan();return result;};
@@ -5223,6 +5346,7 @@ buttons.forEach(b=>{const on=shown.includes(b);if(b.__wzgEM===undefined)b.__wzgE
   }
   const featureBindingWarnings=new Set();
   function bindSnakeFeatures(owner){
+    // An optional feature must not interrupt the game's snake constructor.
     for(const bind of [bindCustomSnake,bindDirectHUD,bindVisualName,hideNativeZoomSlider,bindWormateMinimap,bindMobileHud,bindMobileToolbar,bindLightweightBodies,bindRedHelper,bindAbilityHud,bindCurveIcon,bindSpeedReplacement,bindMagnetReplacement]){
       try{bind(owner);}catch(error){
         if(!featureBindingWarnings.has(bind.name)){featureBindingWarnings.add(bind.name);console.error('[Betterzilla] '+bind.name,error);}
@@ -5241,12 +5365,14 @@ buttons.forEach(b=>{const on=shown.includes(b);if(b.__wzgEM===undefined)b.__wzgE
       while(p && !descriptor){descriptor=Object.getOwnPropertyDescriptor(p,'visible');p=Object.getPrototypeOf(p);}
       if(!descriptor?.get || !descriptor?.set)return;
       let requested=descriptor.get.call(tag);
+      // TT players keep a small red dot where the tag was, so they are easy to spot.
       let dot=null;
       let ttText=null,ttResult=false;
       const isTT=()=>{const text=tag.text;if(text!==ttText){ttText=text;ttResult=/\bTT\b/i.test(String(text??''));}return ttResult;};
       const ensureDot=()=>{
         if(dot && !dot.destroyed)return dot;
         try{
+          // Small red dot with a light rim and a soft red glow, centered above the nickname.
           const base=parseFloat(tag.style.fontSize)||14;
           dot=new tag.constructor({text:'\u25CF',resolution:3,style:{
             fontFamily:'Arial',fontSize:Math.max(6,Math.round(base*0.6)),fontWeight:'700',fill:'#ff2d3a',
@@ -5267,8 +5393,11 @@ buttons.forEach(b=>{const on=shown.includes(b);if(b.__wzgEM===undefined)b.__wzgE
         const d=showDot?ensureDot():dot;
         if(d && !d.destroyed){
           d.visible=showDot;
+          // Sit right above the nickname, horizontally centered on it.
           if(showDot)d.position.set(owner.Ic.width/2, owner.Ic.position.y-owner.Ic.height*(owner.Ic.anchor?.y||0)-1);
         }
+        // Remove the badge's reserved offset and center only the actual nickname.
+        // Preserve the full native text; do not split or shorten player names.
         if(extraPrefs.hidePlayerTags) {
           owner.Ic.position.x=0;
           owner.ca.pivot.x=owner.Ic.position.x + owner.Ic.width/2;
@@ -5278,12 +5407,14 @@ buttons.forEach(b=>{const on=shown.includes(b);if(b.__wzgEM===undefined)b.__wzgE
         }
       }};
       Object.defineProperty(tag,'visible',{configurable:true,get(){return descriptor.get.call(this);},set(next){requested=next;entry.apply();}});
+      // Keep the entry alive only for the lifetime of this tag.
       tag.__wzgTagVisibility=entry;
       trackWeak(playerTagRefs,entry,e=>e.tag.destroyed);
       const initName=snakeInitMethod(owner),original=initName?owner[initName]:null;
       if(typeof original==='function')owner[initName]=function(){
         const result=original.apply(this,arguments);entry.apply();return result;
       };
+      // The current native constructor still assigns text/offsets after this setter.
       nativeTimeout(()=>entry.apply(),0);
     }});
   }
@@ -5296,6 +5427,7 @@ buttons.forEach(b=>{const on=shown.includes(b);if(b.__wzgEM===undefined)b.__wzgE
     for(let i=0;i<input.length;i++){key=(3793+4513*key)&255;encoded+=(input.charCodeAt(i)^key).toString(16).padStart(2,'0');}
     store.set('wtr_config',encoded);
   }
+  // One-time migration: restore graphics saved by older anti-lag versions.
   function restorePreviousResolution() {
     const backup=loadJSON(antiLagBackupKey,null);
     if(!backup)return;
@@ -5305,6 +5437,7 @@ buttons.forEach(b=>{const on=shown.includes(b);if(b.__wzgEM===undefined)b.__wzgE
     store.remove(antiLagBackupKey);
   }
   restorePreviousResolution();
+  // Food uses a separate six-argument sprite-pair updater; body segments use five.
 const abilityHudOwners=new Set(),abilityHudBound=new WeakSet();let abilityHudTextures=null,abilityHudLoading=null;
 const abilityHudColors=[0xf1d600,0xe6a832,0x00b7d5,0xff3944,0x00b7d5,0xd7e600,0xed4394,0x219bd6];
 function ensureAbilityHudTextures(sample){
@@ -5329,12 +5462,18 @@ function styleAbilityHud(hud){
  if(extraPrefs.wormateAbilityHud)ensureAbilityHudTextures(sample);
 }
 function refreshAbilityHud(){for(const ref of abilityHudOwners){const hud=ref.deref();if(!hud||hud.destroyed){abilityHudOwners.delete(ref);continue;}styleAbilityHud(hud);}}
-function bindAbilityHud(owner){const hud=hudOf(owner)?.Jc;if(!hud?.uc||typeof hud.xa!=='function'||abilityHudBound.has(hud))return;abilityHudBound.add(hud);abilityHudOwners.add(new WeakRef(hud));const update=hud.xa;hud.xa=function(){const result=update.apply(this,arguments);styleAbilityHud(this);applyMobileHud();return result;};styleAbilityHud(hud);}
-
+    function bindAbilityHud(owner){const hud=hudOf(owner)?.Jc;if(!hud?.uc||typeof hud.xa!=='function'||abilityHudBound.has(hud))return;abilityHudBound.add(hud);abilityHudOwners.add(new WeakRef(hud));const update=hud.xa;hud.xa=function(){const result=update.apply(this,arguments);styleAbilityHud(this);applyMobileHud();return result;};styleAbilityHud(hud);}
+// ===== Effect timers + Wormate icons above opponents' snakes =====
+// snake.V = container dos icones (o jogo so mantem quando a opcao de icones esta em "full"); snake.ga = efeitos ativos {id:{sa,Oe}}.
 const FX_DUR=[40,40,40,120,50,25,40];
+const FX_STEP=34;      // distancia entre os icones
+const FX_OFFSET_X=0;   // ajuste fino: positivo empurra pra direita, negativo pra esquerda
+const FX_KEEP_IDS=['0','1'];
 function decorateEffects(snake){
   const V=snake.V;if(!V||!V.Eb||V.destroyed)return;
   let swapped=false;
+  const only=!!extraPrefs.onlySpeedCurveIcons;
+  const active=[];
   for(const id in V.Eb){
     const icon=V.Eb[id],fx=snake.ga&&snake.ga[id];
     if(!icon||icon.destroyed||!fx||!fx.sa)continue;
@@ -5344,14 +5483,51 @@ function decorateEffects(snake){
     const want=(wantWormate&&abilityHudTextures&&abilityHudTextures[id])||icon.__wzgFxOrig;
     if(icon.texture!==want){icon.texture=want;icon.width=30;icon.height=30;}
     if(icon.texture!==icon.__wzgFxOrig)swapped=true;
+    active.push([id,icon]);
   }
-  snake.__wzgFxTouched=swapped;   // enquanto houver icone trocado, essa cobra ainda precisa ser restaurada se o toggle for desligado
+  let hidden=false;
+  if(only){
+    const keep=active.filter(([id])=>FX_KEEP_IDS.includes(String(id)));
+    for(const [id,icon] of active){
+      const show=FX_KEEP_IDS.includes(String(id));
+      if(icon.visible!==show)icon.visible=show;
+      if(!show)hidden=true;
+    }
+    // centraliza os que sobraram no centro REAL do nome de cada cobra
+    if(keep.length){
+      keep.sort((a,b)=>Number(a[0])-Number(b[0]));   // speed (0) a esquerda, curva (1) a direita
+      let cx=FX_OFFSET_X;
+      try{
+        const name=snake.Ic;
+        if(name&&!name.destroyed&&typeof V.toLocal==='function'){
+          const b=name.getBounds();
+          const gl=b.minX??b.x, gr=b.maxX??(b.x+b.width);
+          if(Number.isFinite(gl)&&Number.isFinite(gr)&&gr>gl){
+            const gy=(b.minY??b.y);
+            cx=V.toLocal({x:(gl+gr)/2,y:gy}).x+FX_OFFSET_X;
+          }
+        }
+      }catch(e){}
+            keep.forEach(([,icon],i)=>{
+        const ax=icon.anchor&&Number.isFinite(icon.anchor.x)?icon.anchor.x:0.5;
+        const w=Math.abs(icon.width)||30;
+        // position.x vira o ponto de ancora; compensa pra o CENTRO do icone cair em cx
+        icon.position.x=cx+(i-(keep.length-1)/2)*FX_STEP+(ax-0.5)*w;
+      });
+    }
+    snake.__wzgFxHidden=true;
+  }else if(snake.__wzgFxHidden){
+    for(const [,icon] of active)if(!icon.visible)icon.visible=true;
+    snake.__wzgFxHidden=false;
+  }
+  snake.__wzgFxTouched=swapped||only||!!snake.__wzgFxHidden;
 }
 const fxPatchedOwners=new WeakSet();
 let fxStableCount=0,fxNeedsSetter=false;
 const fxPerf={on:false,calls:0,shown:0,culled:0,ms:0,timer:0};
 const fxWin={calls:0,on:0};
 let fxCullOff=false;
+// Posicao global do container de efeitos da cobra: so cobras na tela (com margem) sao processadas.
 function snakeOnScreen(V){
   try{
     let x,y;
@@ -5364,6 +5540,7 @@ function snakeOnScreen(V){
     return x>-m&&y>-m&&x<w+m&&y<h+m;
   }catch(e){return true;}
 }
+// Console: betterzillaPerf() liga/desliga um relatorio a cada 2 s do que o hook dos efeitos esta fazendo.
 PAGE.betterzillaPerf=function(on){
   fxPerf.on=on===undefined?!fxPerf.on:!!on;
   if(fxPerf.timer){PAGE.clearInterval(fxPerf.timer);fxPerf.timer=0;}
@@ -5380,11 +5557,13 @@ function fxWrap(orig){
   const patched=function(){
     const r=orig.apply(this,arguments);
     if(fxPerf.on)fxPerf.calls++;
-    if(!extraPrefs.wormateEffectIcons&&!this.__wzgFxTouched)return r;
+    // icones Wormate desligados e nada trocado nessa cobra: nada a fazer
+   if(!extraPrefs.wormateEffectIcons&&!extraPrefs.onlySpeedCurveIcons&&!this.__wzgFxTouched)return r;
     const V=this.V;
     if(!fxCullOff&&V){
       const on=snakeOnScreen(V);
       if(on)fxWin.on++;
+      // se por ~1500 chamadas (varios frames, entao a cobra do proprio jogador ja teria aparecido) NENHUMA cobra pareceu estar na tela, a posicao nao serve: desliga o corte (falha segura)
       if(++fxWin.calls>=1500){if(fxWin.on===0){fxCullOff=true;console.warn('[Betterzilla] corte por tela desligado: posicao das cobras invalida.');}fxWin.calls=fxWin.on=0;}
       if(!on){if(fxPerf.on)fxPerf.culled++;return r;}
     }
@@ -5399,6 +5578,7 @@ function fxWrap(orig){
 function hookEffectSnake(s){
   if(typeof s.Pe!=='function'||typeof s.Le!=='function'||(typeof s.dk!=='function'&&typeof s.Bf!=='function'))return;
   const objProto=PAGE.Object.prototype,has=Object.prototype.hasOwnProperty;
+  // preferido: embrulhar o metodo UMA vez no prototipo (antes era um closure por cobra)
   if(!has.call(s,'Pe')){
     let owner=Object.getPrototypeOf(s);
     while(owner&&owner!==objProto&&!has.call(owner,'Pe'))owner=Object.getPrototypeOf(owner);
@@ -5408,6 +5588,7 @@ function hookEffectSnake(s){
       return;
     }
   }
+  // fallback: Pe e propriedade da propria instancia, embrulha so essa cobra (e mantem a armadilha)
   if(s.__wzgFxHooked)return;
   s.__wzgFxHooked=true;
   s.Pe=fxWrap(s.Pe);
@@ -5419,6 +5600,7 @@ function hookEffectSnake(s){
   const setter=function(value){
     Object.defineProperty(this,'ga',{value,writable:true,configurable:true,enumerable:true});
     try{hookEffectSnake(this);}catch(error){}
+    // depois de varias cobras seguidas no mesmo prototipo ja embrulhado, a armadilha global some de vez
     if(fxStableCount>=40&&!fxNeedsSetter){const d=Object.getOwnPropertyDescriptor(fxProto,'ga');if(d&&d.set===setter)delete fxProto.ga;}
   };
   Object.defineProperty(fxProto,'ga',{configurable:true,set:setter});
@@ -5459,6 +5641,7 @@ function refreshWormateFood(){
 }
 function bindWormateFood(view,food){
  const sprite=view.Oa?.J?.o,type=food.F?.$a;
+ // The native constructor classifies hb >= 80 as special items.
  if(!sprite||!Number.isInteger(type)||type<0||(type>=80&&(type<200||type>205))||wormateFoodParts.has(sprite))return;
  wormateFoodParts.add(sprite);const glow=view.Oa.id?.o;const foodVariant=((Math.imul(type,31)^Math.imul(Math.floor((food.Nc||0)*64),73856093)^Math.imul(Math.floor((food.Qc||0)*64),19349663))>>>0)%38;const entry={sprite,type,foodVariant,texture:sprite.texture,glow,glowTexture:glow?.texture,glowAnchorX:glow?.anchor?.x,glowAnchorY:glow?.anchor?.y};sprite.__wzgFoodReplacement=entry;trackWeak(wormateFoodEntries,entry,e=>e.sprite.destroyed);
  if(wormateFoodTextures)applyWormateFood(entry);else if(extraPrefs.wormateFood&&!wormateFoodLoading)refreshWormateFood();
@@ -5469,6 +5652,8 @@ function installWormateFoodBinding(view){
  proto.xa=function(food){
     if(!this.__wzgFoodReplacementChecked){
       this.__wzgFoodReplacementChecked=true;bindWormateFood(this,food);
+      // One-time bind done: from now on this instance calls the native updater directly (no wrapper per frame).
+      // Only for exact instances of this class, so a subclass override calling super is never shadowed.
       if(Object.getPrototypeOf(this)===proto)Object.defineProperty(this,'xa',{value:update,writable:true,configurable:true,enumerable:false});
     }
     return arguments.length<2?update.call(this,food):update.apply(this,arguments);
@@ -5489,6 +5674,7 @@ function installWormateFoodBinding(view){
       const patched=function(x,y,size,alpha,glowSize,glowAlpha){
         if(!extraPrefs.hideFoodGlow && !extraPrefs.lightFood){this.__wzgFoodCache=null;return original.call(this,x,y,size,alpha,glowSize,glowAlpha);}
         this.J.Aa(true);
+        // vale pros dois modos: so toca no sprite quando algo mudou (a "geracao" invalida o cache ao trocar de modo)
         let c=this.__wzgFoodCache;
         if(!c||c.g!==foodGen)c=this.__wzgFoodCache={g:foodGen};
         if(c.x!==x||c.y!==y){this.J.Je(x,y);c.x=x;c.y=y;}
@@ -5564,6 +5750,7 @@ function installWormateFoodBinding(view){
       formattingScoreboard = true;
       try {
         const result = update.apply(this,arguments);
+        // Give raw numbers their own space; preserve native player/team rows.
         for (const row of this.L) {
           if (!row.od || !row.$) continue;
           const numbered=/^\d+$/.test(String(row.kd?.text));
@@ -5639,6 +5826,7 @@ function installWormateFoodBinding(view){
     const hs = entries.find(([,data]) => data.kind === 'hs')?.[0];
     const record = entries.find(([,data]) => data.kind === 'record')?.[0];
     if (hs && record && hs.parent === record.parent) {
+      // Use actual text bounds, not the ranking mask or an old saved drag position.
       const labels = [hs.Ye, ...hs.children.slice(2)];
       const bottom = Math.max(...labels.map(text => text.position.y + text.height));
       record.position.y = hs.position.y + bottom * hs.scale.y + 8 - record.Ye.position.y * record.scale.y;
@@ -5665,6 +5853,7 @@ function installWormateFoodBinding(view){
     }
     container.Zc = 0;
   }
+  // Nome minificado do metodo que cria o texto flutuante "+2510": 'Ol' em builds antigos, 'Pl' no atual.
   function scorePointsKey(node) { return typeof node.Pl==='function' ? 'Pl' : (typeof node.Ol==='function' ? 'Ol' : null); }
   function bindScoreEffects(container) {
     if (extraRuntime.effects.has(container)) return;
@@ -5677,6 +5866,7 @@ function installWormateFoodBinding(view){
       return points.apply(this, arguments);
     };
     container[killKey] = function() {
+      // Preserve native HS/kill counters and sound selection (including every tenth HS).
       const result = kill.apply(this, arguments);
       if (extraPrefs.antiLag) clearScoreEffects(this);
       return result;
@@ -5733,6 +5923,7 @@ function installWormateFoodBinding(view){
       const input = (extraPrefs.rankRedesign||mobileHudActive()) ? limited.map(row => [row[0],row[1],-1]) : limited;
       const retired = [...this.Tb.children.slice(1),...this.children.slice(2)];
       const result = original.call(this,input);
+      // Native tf removes old labels without freeing their text textures.
       for (const old of retired) if (!old.parent && !old.destroyed) old.destroy?.();
       styleRank(this,kind);
       updateRankSize();
@@ -5742,6 +5933,8 @@ function installWormateFoodBinding(view){
   }
   function inspectGameHUD(root) {
     const found = [];
+    // The supplied game's HUD components are direct children of its HUD render root.
+    // Do not traverse the world scene, snakes, food or DOM.
     for (const node of (root?.children || []).slice(0,48)) {
       try {
       const title = node.Ye?.text;
@@ -5770,6 +5963,7 @@ function installWormateFoodBinding(view){
           scanned.set(root, root.children.length);
           try { for (const kind of inspectGameHUD(root)) bound.add(kind); } catch (error) { console.warn('[Betterzilla] HUD integration:',error); }
         }
+        // Once bound, no inspection or wrapper remains on the render path.
         if (bound.size === 4) renderer.render = render;
         return render.apply(this, arguments);
       };
@@ -5777,6 +5971,9 @@ function installWormateFoodBinding(view){
   }
   installHUDIntegration();
 
+  // ===== Show abilities (Controls) =====
+  // Os icones Wormate acima dos oponentes so aparecem com o select nativo "Show abilities" em "Full":
+  // ligando o toggle a gente forca "Full" (guardando o valor anterior) e, ao desligar, volta pro valor que a pessoa tinha.
   const ENEMY_CD_BACKUP='wzg-enemy-cd-backup';
   let enemyCdWarned=false;
   function findAbilitySelect(){
@@ -5824,7 +6021,9 @@ function installWormateFoodBinding(view){
       <div class="wzg-extra-grid wzg-organized-grid">
         <div class="wzg-settings-stack">
         <section class="wzg-extra-card" aria-label="Performance"><header><span class="wzg-extra-icon">${icons.performance}</span><div><h5>Performance</h5><p>Reduce visual work without changing resolution.</p></div></header>
+${toggle('perfPreset','Performance preset (no lag)','One switch: Anti-lag, Lightweight food, no +points popups and no screen flashes. Turn it off to restore your previous choices.')}
 ${toggle('lightFood','Lightweight food','Remove food glow and skip unchanged food transforms. Keeps every item visible.')}
+${toggle('wormworldGlow','Wormworld-style body glow','Snake border glow pulses segment by segment (fast ripple when boosting), like Wormworld, instead of one long wave.')}
 ${toggle('antiLag','Anti-lag mode','Remove body glow and its updates, and hide floating effects. Keeps your resolution unchanged.')}
         </section>
         <section class="wzg-extra-card" aria-label="Helpers"><header><span class="wzg-extra-icon">${icons.controls}</span><div><h5>Helpers</h5><p>Visual guides for heads and the arena border.</p></div></header>
@@ -5857,6 +6056,7 @@ ${toggle('fullScores','Full score numbers','Show complete scores without M or B.
 ${toggle('wormateExtensionAbilities','Show speed & curve like Wormate extensions','Green speed arrows plus the golden curve chevron, shown together like the Wormate Extensions. Overrides Replace speed icon and Hide curve icon while on.')}
 ${toggle('hideCurveIcon','Hide curve icon','Hide only the blue curve spiral in front of snakes. Keep other ability effects.')}
 ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icons shown above opponents (speed, curve, 2x, 5x...) for the Wormate ones. Needs the icon display set to full.')}
+${toggle('onlySpeedCurveIcons','Only speed & curve above snakes','Show only the speed and curve icons above opponents and hide the rest (magnet, 2x, 10x...). Needs the icon display set to full.')}
 </section>
         </div>
       </div>`;
@@ -5888,10 +6088,24 @@ ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icon
       updateRankSize();
     });
     rankSlider.addEventListener('change', save);
+    // "Performance preset": one switch that turns on every lag-cutting option and, when turned off, puts each one back as it was.
+    const PERF_KEYS=['antiLag','lightFood','hideScorePopups','noScreenEffects'];
+    function applyPerfPreset(on){
+      if(on)extraPrefs.perfBackup=Object.fromEntries(PERF_KEYS.map(k=>[k,!!extraPrefs[k]]));
+      const target=on?Object.fromEntries(PERF_KEYS.map(k=>[k,true])):(extraPrefs.perfBackup||{});
+      for(const k of PERF_KEYS){
+        if(!(k in target)||!!extraPrefs[k]===target[k])continue;
+        const el=row.querySelector('input[data-extra="'+k+'"]');if(!el)continue;
+        el.checked=target[k];el.dispatchEvent(new Event('change',{bubbles:true}));   // runs the normal handler for that option
+      }
+      if(!on)delete extraPrefs.perfBackup;
+      save();
+    }
     row.querySelectorAll('[data-extra]').forEach(input=>{
       const key=input.dataset.extra;input.checked=!!extraPrefs[key];
       input.addEventListener('change',()=>{
         extraPrefs[key]=input.checked;save();
+        if(key==='perfPreset')applyPerfPreset(input.checked);
         if(key==='wormateEffectIcons')applyAbilityDisplay(true);
         if(key==='x1RedHelper')refreshRedHelper();
         if(key==='hideCurveIcon')refreshCurveIcons();
@@ -5906,7 +6120,7 @@ ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icon
         if(key==='antiLag'){if(input.checked)for(const node of extraRuntime.effects)if(!node.destroyed)clearScoreEffects(node);}
         if(key==='hidePlayerTags')updatePlayerTags();
         if(key==='hideFoodGlow'||key==='lightFood')foodHookSync?.();
-        if(key==='antiLag')segmentHookSyncs.forEach(f=>f());
+        if(key==='antiLag'||key==='wormworldGlow')segmentHookSyncs.forEach(f=>f());
 
         if (key==='recordTop3'||key==='rankRedesign') for(const [node,data] of extraRuntime.ranks) if(!node.destroyed)node.tf(data.rows);
       });
@@ -5919,6 +6133,8 @@ ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icon
 
 
 
+  // Pixi text is measured/rasterized with 2D contexts, including offscreen canvases.
+  // Change font assignment, not draw calls; preserve native metrics and font sizes.
   const GAME_FONTS = {
     original: {label: 'Original', family: ''},
     arial: {label: 'Arial', family: 'Arial, sans-serif'},
@@ -5935,6 +6151,7 @@ ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icon
   const activeFont = fontPrefs.family;
   function replaceCanvasFont(value, family) {
     if (typeof value !== 'string') return value;
+    // Retain style, weight, size, and optional line height from the game's shorthand.
     return value.replace(/^(.*?\b\d*\.?\d+(?:px|pt|em|rem|%)(?:\s*\/\s*[\d.]+(?:px|pt|em|rem|%)?)?\s+).+$/i, '$1' + family);
   }
   function installGameFont() {
@@ -6001,6 +6218,8 @@ ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icon
     sync();
   }
 
+  // Timing integration adapted from sxnic o goat 2.7, kubabreak (MIT).
+  // Real timer IDs are preserved; clocks are rebased BEFORE changing the rate.
   function createSpeedController(host) {
     const original = {
       perf: host.performance.now.bind(host.performance), date: host.Date.now.bind(host.Date),
@@ -6025,6 +6244,7 @@ ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icon
         return original.interval(callback, Number(delay || 0) / rate, ...args);
       };
       host.requestAnimationFrame = callback => original.raf(timestamp => callback(perfAt(timestamp)));
+      // clearTimeout/clearInterval/cancelAnimationFrame stay native and interchangeable.
       installed = true;
     }
     return {
@@ -6043,6 +6263,7 @@ ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icon
     };
   }
 
+  // Chaves de compatibilidade: o userscript de velocidade separado seta essa flag, e a config antiga ficava nessa chave.
   const SEPARATE_SPEED_SCRIPT_FLAG = '__speedHackInjected', LEGACY_SPEED_STORAGE_KEY = 'speedhack_settings';
   const oldSpeedSettings = loadJSON(LEGACY_SPEED_STORAGE_KEY, {});
   const speedPrefs = loadJSON('wzg-speed-settings', {
@@ -6207,6 +6428,7 @@ ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icon
       sync();
     }
     enabled.addEventListener('change', () => apply(slider.value, enabled.checked));
+    // Preview on input, commit once on release: no repeated storage writes or injection.
     slider.addEventListener('input', () => {
       const value = Math.round(Number(slider.value) * 1000) / 1000;
       readout.textContent = format(value);
@@ -6248,6 +6470,7 @@ ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icon
   }
 
 
+  // ---- Perfil: widget compacto (avatar, nome, barra de XP, nivel) + janela com as estatisticas ----
   function wzgEsc(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   }
@@ -6255,6 +6478,7 @@ ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icon
     const digits = String(text || '').replace(/[^\d]/g, '');
     return digits ? Number(digits) : null;
   }
+  // Remove caracteres invisiveis/de preenchimento e reticencias soltas do nome exibido.
   function wzgCleanName(text) {
     return String(text || '')
       .replace(/[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180E\u200B-\u200F\u2060-\u206F\u2800\u3164\uFEFF\uFFA0\uFFF9-\uFFFC]|\uDB40[\uDC00-\uDFFF]/g, '')
@@ -6294,11 +6518,13 @@ ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icon
     }
     return { name, rows, level, xp, xpMax, avatar };
   }
+  // Avatar personalizado do widget de perfil (baixado via GM_xmlhttpRequest e usado como blob).
   const CUSTOM_AVATAR = 'https://i.pinimg.com/736x/d5/99/fe/d599fe0296ca45cb6b138d5f410fda11.jpg';
   let customAvatarSrc = '';
   const AVATAR_KEY = 'wzg-custom-avatar';
   let userAvatar = '';
   try { userAvatar = store.get(AVATAR_KEY) || ''; } catch {}
+  // Recorta no centro (quadrado) e reduz a imagem escolhida para guardar no localStorage.
   function wzgResizeImage(file, size) {
     return new Promise((resolve, reject) => {
       const src = URL.createObjectURL(file);
@@ -6430,6 +6656,7 @@ ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icon
       widget.setAttribute('aria-label', 'Open profile');
       widget.addEventListener('click', openProfile);
     }
+    // Desktop: topo do painel esquerdo (acima do card Rooms). Celular: dentro do card do jogador.
     const left = document.querySelector('.shell > .panel:first-child');
     const host = DESKTOP_MQ.matches && left ? left : card;
     if (widget.parentElement !== host || host.firstChild !== widget) host.insertBefore(widget, host.firstChild);
@@ -6526,11 +6753,13 @@ ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icon
     const observer = new MutationObserver(records => {
       let relevant = false;
       const playing = document.documentElement.classList.contains('wzg-ingame');
+      // Em partida so modais (settings etc.) importam; atualizacoes do HUD sao ignoradas.
       const activeRoots = playing ? '.settings-modal, .wzs-modal' : roots;
       for (const record of records) {
         if (record.target.closest?.('.home-center-server-list')) continue;
         if (record.target.closest?.(activeRoots)
           && Array.from(record.removedNodes).some(node => node.nodeType === 1)) relevant = true;
+        // Text counters and game HUD updates never remount the redesign.
         for (const node of record.addedNodes) {
           if (node.nodeType !== 1) continue;
           if (state.prefs.hideKillFeed) {
@@ -6556,28 +6785,35 @@ ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icon
     observe();
     DESKTOP_MQ.addEventListener("change", scheduleMount);
     cleanDOMKillFeed();
+    // O jogo cria um array novo de kill feed a cada partida/respawn. Rearma o filtro em qualquer
+    // forma de entrar numa partida (botoes, Enter, R, ou a tela de jogo aparecendo).
     const inGame = () => document.documentElement.classList.contains('wzg-ingame');
     document.addEventListener('click', event => {
       const t = event.target;
       if (t?.closest?.('.play-game-btn, #result-play-again, #result-continue, .replay-btn, [class*="play"], [class*="replay"], [class*="respawn"]')
         || (!inGame() && t?.closest?.('button, .btn, [role="button"]'))) rearmKillFeedFilter();
       nativeTimeout(updateInGame, 300); nativeTimeout(updateInGame, 1500);
+      // Abas nativas que so revelam nodes ja existentes tambem precisam remontar.
       if (t?.closest?.('#wzg-sidebar, .wzs-tabs, #settings-tabs, .change-name-btn, .server-map')) scheduleMount();
     }, true);
     document.addEventListener('keydown', event => {
       const key = (event.key || '').toLowerCase();
       if ((key === 'enter' && !inGame()) || (key === 'r' && !event.ctrlKey && !event.metaKey && !event.altKey)) { rearmKillFeedFilter(); nativeTimeout(updateInGame, 300); nativeTimeout(updateInGame, 1500); }
     }, true);
+    // Marca quando esta em partida para desligar enfeites caros do menu (blur, camadas fixas).
     let wasPlaying = false;
     function updateInGame() {
       const canvas = document.getElementById('gameCanvas');
       const shell = document.querySelector('.shell');
       const playing = !!canvas && canvas.getClientRects().length > 0 && !(shell && shell.getClientRects().length > 0);
       document.documentElement.classList.toggle('wzg-ingame', playing);
+      // Entrou numa partida por qualquer caminho: garante que o filtro do kill feed esta armado.
       if (playing && !wasPlaying) { rearmKillFeedFilter(); hideUpdateNotice(); armBrokenWatch(); }
+      // Voltou pro menu: atualiza o perfil (o observer ficou pausado durante a partida).
       if (!playing && wasPlaying) { try { refreshProfile(); } catch {} nativeTimeout(maybeShowUpdateNotice, 600); }
       wasPlaying = playing;
     }
+    // Sem polling: reage quando o canvas/menu aparecem ou somem.
     const igSeen = new WeakSet();
     const igObserver = typeof IntersectionObserver === 'function' ? new IntersectionObserver(updateInGame) : null;
     function watchInGame() {
@@ -6588,6 +6824,7 @@ ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icon
     }
     if (igObserver) { watchInGame(); updateInGame(); document.addEventListener('visibilitychange', updateInGame); }
     else nativeInterval(updateInGame, 1000);
+    // Observer so da area de salas (antes era um setInterval de 1,5s refazendo tudo).
     let roomsBox = null, roomsQueued = false;
     function watchRooms() {
       const box = document.querySelector('.center-bottom');
@@ -6604,6 +6841,7 @@ ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icon
     nativeTimeout(decorateRooms, 4000);
 
 
+    // Atalho R: clica no botao Respawn nativo (a cobra morre e renasce)
     document.addEventListener('keydown', event => {
       if (!event.key || event.key.toLowerCase() !== 'r') return;
       if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
@@ -6635,3 +6873,4 @@ ${toggle('wormateEffectIcons','Wormate icons above snakes','Swap the effect icon
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
   else boot();
 })();
+
