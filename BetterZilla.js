@@ -1,11 +1,5 @@
-// Look, if you’re seeing this, you’re likely someone who is either hunting for the source code of my extension or looking to analyze it
-///////////////////////////////
-// I honestly don’t mind if you steal the code or reuse it; if you do, please use some common sense and give me credits
-//This extension was created with no intention of **harming other players**; the goal is simply to provide a plugin with additional features for the game--
-//as well as to improve the experience for mobile devices—given that the game's HUD often receives a lot of criticism
-/////////////////////////////////////////
-//If you are Samet, or someone from the Wormzilla administration team, and you would like me to permanently delete or remove the extension, please get in touch with me via Discord.
-//Discord: skinny_yz
+
+
 (() => {
   'use strict';
 
@@ -4319,7 +4313,7 @@
   installNativeCameraAccess();
 
   const extraPrefs = loadJSON('wzg-game-extras', {
-    mobileHudLayout: true, hidePlayerTags: true, x1RedHelper: false, hideCurveIcon: false, wormateExtensionAbilities: false, replaceSpeedIcon: true, replaceMagnetIcon: true, antiLag: false, perfPreset: false, hideScorePopups: false, hideFoodGlow: false, lightFood: false, wormateFood: false, wormworldGlow: false, wormateAbilityHud: true, noScreenEffects: false, colorfulScoreboard: true,
+    mobileHudLayout: true, hidePlayerTags: true, x1RedHelper: false, hideCurveIcon: false, wormateExtensionAbilities: false, replaceSpeedIcon: true, replaceMagnetIcon: true, antiLag: false, hideScorePopups: false, hideFoodGlow: false, lightFood: false, wormateFood: false, wormworldGlow: false, wormateAbilityHud: true, noScreenEffects: false, colorfulScoreboard: true,
     recordTop3: true, rankRedesign: true, rankSize: 75, fullScores: true, saturation: 100, wormateEffectIcons: true, onlySpeedCurveIcons: false,
   });
   // Merge the former potion preference once; future saves contain one toggle.
@@ -6021,7 +6015,6 @@ function installWormateFoodBinding(view){
       <div class="wzg-extra-grid wzg-organized-grid">
         <div class="wzg-settings-stack">
         <section class="wzg-extra-card" aria-label="Performance"><header><span class="wzg-extra-icon">${icons.performance}</span><div><h5>Performance</h5><p>Reduce visual work without changing resolution.</p></div></header>
-${toggle('perfPreset','Performance preset (no lag)','One switch: Anti-lag, Lightweight food, no +points popups and no screen flashes. Turn it off to restore your previous choices.')}
 ${toggle('lightFood','Lightweight food','Remove food glow and skip unchanged food transforms. Keeps every item visible.')}
 ${toggle('wormworldGlow','Wormworld-style body glow','Snake border glow pulses segment by segment (fast ripple when boosting), like Wormworld, instead of one long wave.')}
 ${toggle('antiLag','Anti-lag mode','Remove body glow and its updates, and hide floating effects. Keeps your resolution unchanged.')}
@@ -6088,24 +6081,10 @@ ${toggle('onlySpeedCurveIcons','Only speed & curve above snakes','Show only the 
       updateRankSize();
     });
     rankSlider.addEventListener('change', save);
-    // "Performance preset": one switch that turns on every lag-cutting option and, when turned off, puts each one back as it was.
-    const PERF_KEYS=['antiLag','lightFood','hideScorePopups','noScreenEffects'];
-    function applyPerfPreset(on){
-      if(on)extraPrefs.perfBackup=Object.fromEntries(PERF_KEYS.map(k=>[k,!!extraPrefs[k]]));
-      const target=on?Object.fromEntries(PERF_KEYS.map(k=>[k,true])):(extraPrefs.perfBackup||{});
-      for(const k of PERF_KEYS){
-        if(!(k in target)||!!extraPrefs[k]===target[k])continue;
-        const el=row.querySelector('input[data-extra="'+k+'"]');if(!el)continue;
-        el.checked=target[k];el.dispatchEvent(new Event('change',{bubbles:true}));   // runs the normal handler for that option
-      }
-      if(!on)delete extraPrefs.perfBackup;
-      save();
-    }
     row.querySelectorAll('[data-extra]').forEach(input=>{
       const key=input.dataset.extra;input.checked=!!extraPrefs[key];
       input.addEventListener('change',()=>{
         extraPrefs[key]=input.checked;save();
-        if(key==='perfPreset')applyPerfPreset(input.checked);
         if(key==='wormateEffectIcons')applyAbilityDisplay(true);
         if(key==='x1RedHelper')refreshRedHelper();
         if(key==='hideCurveIcon')refreshCurveIcons();
@@ -6873,4 +6852,3 @@ ${toggle('onlySpeedCurveIcons','Only speed & curve above snakes','Show only the 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
   else boot();
 })();
-
