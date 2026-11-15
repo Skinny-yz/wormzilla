@@ -4119,7 +4119,7 @@
     mountConfigFiles(modal);
     if(!document.getElementById('wzg-sidebar-order-style')){const style=document.createElement('style');style.id='wzg-sidebar-order-style';style.textContent="html.wzg-ready .settings-modal,html.wzg-ready .settings-modal *{scrollbar-width:thin!important;scrollbar-color:rgba(190,190,205,.28) transparent!important}html.wzg-ready .settings-modal ::-webkit-scrollbar{width:6px!important;height:6px!important;background:transparent!important}html.wzg-ready .settings-modal ::-webkit-scrollbar-track{background:transparent!important;border:0!important;box-shadow:none!important;margin:8px 0!important}html.wzg-ready .settings-modal ::-webkit-scrollbar-thumb{background:rgba(190,190,205,.25)!important;border:1px solid rgba(255,255,255,.07)!important;border-radius:999px!important;box-shadow:inset 0 1px rgba(255,255,255,.08)!important}html.wzg-ready .settings-modal ::-webkit-scrollbar-thumb:hover{background:rgba(210,210,225,.42)!important}html.wzg-ready .settings-modal ::-webkit-scrollbar-thumb:active{background:rgba(220,220,235,.55)!important}html.wzg-ready .settings-modal ::-webkit-scrollbar-button{display:none!important;width:0!important;height:0!important}html.wzg-ready .settings-modal ::-webkit-scrollbar-corner{background:transparent!important}@supports selector(::-webkit-scrollbar){html.wzg-ready .settings-modal,html.wzg-ready .settings-modal *{scrollbar-width:auto!important;scrollbar-color:auto!important}}"+'html.wzg-ready #settings-tabs .wzg-sidebar-divider{height:1px;min-height:1px;flex:0 0 1px;background:rgba(255,255,255,.14);margin:9px 8px 10px;pointer-events:none}'+"html.wzg-ready #settings-tabs,html.wzg-ready .settings-body,html.wzg-ready .settings-modal .wc-groups{scrollbar-width:thin!important;scrollbar-color:#55555f #141416!important;color-scheme:dark!important}html.wzg-ready #settings-tabs::-webkit-scrollbar,html.wzg-ready .settings-body::-webkit-scrollbar{width:6px!important;background:#141416!important}html.wzg-ready #settings-tabs::-webkit-scrollbar-track,html.wzg-ready .settings-body::-webkit-scrollbar-track{background:#141416!important}html.wzg-ready #settings-tabs::-webkit-scrollbar-thumb,html.wzg-ready .settings-body::-webkit-scrollbar-thumb{background:#55555f!important;border-radius:99px!important;border:1px solid #141416!important}html.wzg-ready #settings-tabs::-webkit-scrollbar-button,html.wzg-ready .settings-body::-webkit-scrollbar-button{display:none!important;height:0!important;width:0!important}";document.head.appendChild(style);}
 
-    mountCustomSettings(modal,CUSTOM_TABS.custom);mountCustomSettings(modal,CUSTOM_TABS.wormworld);
+    mountCustomSettings(modal,CUSTOM_TABS.custom);mountCustomSettings(modal,CUSTOM_TABS.wormworld);mountSkinBuilder(modal);
     const settingsTabs=modal.querySelector('#settings-tabs');if(settingsTabs){const config=settingsTabs.querySelector('[data-tab="configfiles"]');if(config)settingsTabs.appendChild(config);const extension=settingsTabs.querySelector('[data-tab="extension"]');if(extension&&!settingsTabs.querySelector('.wzg-sidebar-divider')){const divider=document.createElement('div');divider.className='wzg-sidebar-divider';divider.setAttribute('role','separator');extension.before(divider);}}
 
     mountFontSettings(modal);
@@ -4643,10 +4643,36 @@ function bindRedHelper(owner){
     return !!d && typeof d === 'object' && d.textures && d.regions && d.skin && d.eyes && d.mouth
       && d.glasses && d.hat && d.glows && Array.isArray(d.groups);
   }
+    // ===== My skins (made in the Skin builder tab) =====
+  // Saved in localStorage and injected into CUSTOM_DATA as normal skins (ids MY_*), so the game side needs no changes.
+  const MY_SKINS_KEY = 'wzg-my-skins';
+  let mySkins = loadJSON(MY_SKINS_KEY, []);
+  const customGroupRebuilders = [];
+  function syncMySkins() {
+    if (!customDataReady) return;
+    const ids = [];
+    for (const s of mySkins) {
+      if (!s || typeof s.id !== 'string' || !Array.isArray(s.frames) || !s.frames.length) continue;
+      if (!s.frames.every(r => CUSTOM_DATA.regions[r])) continue;
+      CUSTOM_DATA.skin[s.id] = s.frames.slice();
+      CUSTOM_DATA.glows[s.id] = (s.glows || []).filter(r => CUSTOM_DATA.regions[r]);
+      (CUSTOM_DATA.names || (CUSTOM_DATA.names = {}))[s.id] = s.name || s.id;
+      ids.push(s.id);
+    }
+    for (const k of Object.keys(CUSTOM_DATA.skin)) {
+      if (k.startsWith('MY_') && !ids.includes(k)) { delete CUSTOM_DATA.skin[k]; delete CUSTOM_DATA.glows[k]; }
+    }
+    const at = CUSTOM_DATA.groups.findIndex(g => g.id === 'sg-my');
+    if (ids.length) { const g = { id: 'sg-my', name: 'My skins', ids }; if (at >= 0) CUSTOM_DATA.groups[at] = g; else CUSTOM_DATA.groups.push(g); }
+    else if (at >= 0) CUSTOM_DATA.groups.splice(at, 1);
+    sanitizeCustomPrefs();
+    for (const rebuild of customGroupRebuilders) { try { rebuild(); } catch {} }
+  }
   function applyCustomData(d) {
     if (customDataReady || !validCustomData(d)) return false;
     Object.assign(CUSTOM_DATA, d);
     customDataReady = true;
+    syncMySkins();
     sanitizeCustomPrefs();
     return true;
   }
@@ -4660,7 +4686,7 @@ function bindRedHelper(owner){
       const parsed = JSON.parse(text);
       if (!validCustomData(parsed)) throw Error('The custom data file has an invalid format.');
       const usedNow = applyCustomData(parsed);
-      if (!usedNow && customDataReady && text !== cached) { Object.assign(CUSTOM_DATA, parsed); sanitizeCustomPrefs(); }  // dados novos do repo valem sem precisar recarregar 2x
+      if (!usedNow && customDataReady && text !== cached) { Object.assign(CUSTOM_DATA, parsed); syncMySkins(); sanitizeCustomPrefs(); }  // dados novos do repo valem sem precisar recarregar 2x
       try { store.set(CUSTOM_DATA_CACHE, text); } catch {}
       if (usedNow) {            // data arrived late: build the Custom tab and re-apply the look
         mountSettingsRedesign();
@@ -4679,6 +4705,307 @@ function bindRedHelper(owner){
     // Capture the native appearance through its existing initialization path.
     nativeTimeout(()=>{if(owner.qa!==visual||visual.Ba.destroyed)return;const initName=snakeInitMethod(owner);if(initName){owner[initName]();customRefresh();}else{customMessage('Game version not recognized: custom look binding unavailable.');}},0);
   }
+    // ===== Skin builder UI =====
+  const BUILDER_AUTO_GLOWS = [['W19_g0',255,255,255],['W19_g1',38,197,217],['W19_g2',253,221,180],['W19_g3',130,192,59],['W19_g4',251,113,74],['W19_g5',161,161,161],['W19_g6',49,149,239],['W19_g7',253,235,100],['W19_g8',243,67,54],['W19_g9',112,66,185],['W19_g10',251,165,55],['W19_g11',49,166,154],['W19_g12',34,167,244],['W19_g13',88,195,244],['W19_g14',235,66,67],['W19_g15',134,96,198]];
+  const BUILDER_GLOW_IDS = [...Array(16).keys()].map(i => 'W19_g' + i).concat([...Array(8).keys()].map(i => 'W19_r' + i), [...'0123456789abcdefghijk'].map(c => 'W18_G' + c));
+  const BUILDER_SOURCES = [
+    { id: 'w19', label: 'Wormate 2019', tex: 'W19', ok: id => /^W19_f\d+$/.test(id) },
+    { id: 'wh', label: 'Halloween', tex: 'WH', ok: id => /^WH_f\d+$/.test(id) },
+    { id: 'w18', label: 'Wormate 2018', tex: 'W18', ok: (id, r) => r.texture === 'W18' && r.w === 64 },
+    { id: 'off', label: 'Official', tex: 'B', ok: (id, r) => r.texture === 'B' && r.w === 64 }
+  ];
+  const BUILDER_ICONS = {
+    left: 'M15 6l-6 6 6 6', right: 'M9 6l6 6-6 6', dup: 'M9 9h10v10H9zM5 15V5h10', del: 'M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13', rev: 'M4 8h13l-3-3M20 16H7l3 3',
+    clear: 'M6 6l12 12M18 6L6 18', plus: 'M12 5v14M5 12h14', minus: 'M5 12h14', match: 'M4 7h16M4 12h10M4 17h16', auto: 'M5 19l9-9M14 4l1.5 3L19 8.5 15.5 10 14 13l-1.5-3L9 8.5 12.5 7zM18 15l.8 1.7L20.5 17.5 18.8 18.3 18 20l-.8-1.7L15.5 17.5l1.7-.8z',
+    save: 'M5 12l5 5L19 7', new: 'M12 5v14M5 12h14'
+  };
+  const bIcon = (n, extra) => '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"' + (extra || '') + '><path d="' + BUILDER_ICONS[n] + '"/></svg>';
+  function mountSkinBuilder(modal) {
+    if (!customDataReady) return;
+    const tabs = modal.querySelector('#settings-tabs'), body = modal.querySelector('.settings-body');
+    if (!tabs || !body || body.querySelector('#tab-builder')) return;
+    const tab = document.createElement('button'); tab.type = 'button'; tab.className = 'tab'; tab.dataset.tab = 'builder';
+    tab.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13 7l4 4"/></svg><span>Skin builder</span>';
+    const section = document.createElement('section'); section.id = 'tab-builder'; section.className = 'sectionS';
+    const btn = (attrs, icon, label, cls) => '<button type="button" class="wb-btn' + (cls ? ' ' + cls : '') + '" ' + attrs + '>' + (icon ? bIcon(icon) : '') + (label ? '<span>' + label + '</span>' : '') + '</button>';
+    section.innerHTML =
+      '<div class="wb-top"><input data-name type="text" maxlength="28" placeholder="Name your skin"><select data-saved title="Your saved skins"></select>'
+      + '<div class="wb-actions">' + btn('data-new', 'new', 'New') + btn('data-save', 'save', 'Save &amp; use', 'wb-primary') + btn('data-del', 'del', 'Delete', 'wb-danger') + '</div></div>'
+      + '<div class="wb-card wb-hero"><div class="wb-stage"><canvas width="640" height="200" aria-label="Skin preview"></canvas><div class="wb-meta" data-meta></div></div></div>'
+      + '<div class="wb-card"><div class="wb-title"><i>1</i><b>Body</b><span>Balls repeat along the snake. First ball = head.</span></div>'
+      + '<div class="wb-seq" data-seq></div>'
+      + '<div class="wb-tools">' + btn('data-act="left" title="Move left"', 'left') + btn('data-act="right" title="Move right"', 'right') + btn('data-act="dup"', 'dup', 'Duplicate') + btn('data-act="del"', 'minus', 'Remove') + btn('data-act="rev"', 'rev', 'Reverse') + btn('data-act="clear"', 'clear', 'Clear')
+      + '<select data-copy><option value="">Copy from a skin...</option></select></div></div>'
+      + '<div class="wb-card"><div class="wb-title"><i>2</i><b>Border</b><span>Its own colour sequence: use 1, 2, 3 or as many colours as balls.</span>'
+      + '<div class="wb-seg wb-right"><button type="button" data-gmode="auto">' + bIcon('auto') + 'Auto</button><button type="button" data-gmode="custom">Custom</button></div></div>'
+      + '<div class="wb-seq wb-gseq" data-gseq></div>'
+      + '<div class="wb-tools" data-gtools>' + btn('data-gact="left" title="Move left"', 'left') + btn('data-gact="right" title="Move right"', 'right') + btn('data-gact="add"', 'plus', 'Add slot') + btn('data-gact="del"', 'minus', 'Remove slot') + btn('data-gact="match"', 'match', 'Match balls') + '</div>'
+      + '<div class="wb-hint" data-ghint></div><div class="wb-glows" data-glows></div></div>'
+      + '<div class="wb-card"><div class="wb-title"><i>3</i><b>Pick balls</b><div class="wb-seg wb-right" data-src></div></div><div class="wb-pal" data-pal></div></div>'
+      + '<div class="wb-status" data-status role="status"></div>';
+    const style = document.createElement('style');
+    style.textContent = [
+      '#tab-builder.active{display:block!important;width:100%!important}',
+      '#tab-builder{--tx:var(--wzg-text,#f2f2f3);--dim:var(--wzg-dim,#99999f);color:var(--tx);font-family:inherit}#tab-builder *{box-sizing:border-box}',
+      '#tab-builder button,#tab-builder select,#tab-builder input[type=text]{font:inherit!important;font-size:12.5px!important;color:var(--tx)!important;background-color:rgba(255,255,255,.04)!important;border:1px solid rgba(255,255,255,.09)!important;border-radius:10px!important;padding:9px 13px!important;cursor:pointer;box-shadow:none!important;outline:0;transition:background-color .15s,border-color .15s,color .15s,transform .12s}',
+      '#tab-builder select{width:auto!important;max-width:100%}',
+      '#tab-builder input[type=text]{cursor:text;flex:2 1 220px;min-width:150px;font-size:14px!important;font-weight:600}#tab-builder input[type=text]::placeholder{color:#66666c}',
+      '#tab-builder button:hover,#tab-builder select:hover,#tab-builder input[type=text]:hover{background-color:rgba(255,255,255,.075)!important;border-color:rgba(255,255,255,.17)!important}',
+      '#tab-builder button:focus-visible,#tab-builder select:focus-visible,#tab-builder input[type=text]:focus-visible{outline:2px solid #fff;outline-offset:2px}#tab-builder button:active{transform:scale(.97)}',
+      '#tab-builder .wb-top{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px;align-items:center}#tab-builder .wb-top select{flex:1 1 190px}#tab-builder .wb-actions{display:flex;gap:6px;flex-wrap:wrap}',
+      '#tab-builder .wb-btn{display:inline-flex;align-items:center;gap:7px}',
+      '#tab-builder .wb-primary{background-color:#f5f5f5!important;color:#101011!important;border-color:#f5f5f5!important;font-weight:700}#tab-builder .wb-primary:hover{background-color:#fff!important;border-color:#fff!important}',
+      '#tab-builder .wb-danger:hover{background-color:rgba(232,178,181,.12)!important;border-color:rgba(232,178,181,.45)!important;color:#e8b2b5!important}',
+      '#tab-builder .wb-card{background:radial-gradient(ellipse at 25% 0,#ffffff06,transparent 65%),linear-gradient(135deg,#ffffff05,#ffffff01);border:1px solid #ffffff12;border-radius:18px;padding:16px;margin:0 0 14px;box-shadow:inset 0 1px #ffffff07,0 16px 40px #0002}',
+      '#tab-builder .wb-hero{padding:12px}#tab-builder .wb-stage{position:relative;max-width:640px;margin:0 auto}',
+      '#tab-builder canvas{display:block;width:100%;margin:0;border-radius:12px;background:radial-gradient(ellipse at 50% 45%,#ffffff0d 0%,#ffffff03 55%,transparent 100%),#0b0b0d;border:1px solid #ffffff0d}',
+      '#tab-builder .wb-meta{position:absolute;left:10px;top:10px;display:flex;gap:6px;font-size:11px}#tab-builder .wb-meta span{background:rgba(13,13,15,.78);border:1px solid #ffffff14;border-radius:20px;padding:3px 10px;color:#b4b4bd}',
+      '#tab-builder .wb-title{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin:0 0 12px;font-size:14px}#tab-builder .wb-title b{font-weight:700;letter-spacing:.01em}',
+      '#tab-builder .wb-title i{font-style:normal;display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#ffffff0f;border:1px solid #ffffff22;color:var(--tx);font-size:11px;font-weight:700}',
+      '#tab-builder .wb-title span{color:var(--dim);font-size:12px}#tab-builder .wb-right{margin-left:auto}',
+      '#tab-builder .wb-seq,#tab-builder .wb-pal,#tab-builder .wb-glows{background:#00000026;border:1px solid #ffffff0a;border-radius:13px;padding:12px}',
+      '#tab-builder .wb-seq{display:flex;flex-wrap:wrap;gap:10px;min-height:68px;align-content:flex-start}#tab-builder .wb-seq.empty{color:var(--dim);font-size:12px;align-items:center;justify-content:center}',
+      '#tab-builder .wb-pal{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:7px;max-height:310px;overflow:auto;scrollbar-width:thin;scrollbar-color:#ffffff25 transparent}',
+      '#tab-builder .wb-glows{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}',
+      '#tab-builder .wb-ball,#tab-builder .wb-cell,#tab-builder .wb-glow,#tab-builder .wb-slot{position:relative;width:44px;height:44px;padding:0!important;border-radius:50%!important;border:1px solid #ffffff14!important;background-color:#ffffff08!important;background-repeat:no-repeat!important}',
+      '#tab-builder .wb-cell{width:100%;height:auto;aspect-ratio:1/1;max-width:52px;justify-self:center}',
+      '#tab-builder .wb-ball:hover,#tab-builder .wb-cell:hover,#tab-builder .wb-glow:hover,#tab-builder .wb-slot:hover{transform:scale(1.1);border-color:#ffffff55!important}',
+      '#tab-builder .wb-ball.sel,#tab-builder .wb-slot.sel{border-color:#f5f5f5!important;box-shadow:0 0 0 3px #ffffff26!important;transform:scale(1.06)}',
+      '#tab-builder .wb-ball::after,#tab-builder .wb-slot::after{content:attr(data-i);position:absolute;right:-5px;bottom:-5px;min-width:17px;height:17px;border-radius:9px;background:#101011;border:1px solid #ffffff2a;color:#c9c9d1;font-size:10px;line-height:15px;text-align:center;padding:0 3px}',
+      '#tab-builder .wb-slot{width:38px;height:38px;border-radius:11px!important;background-color:#0b0b0d!important}#tab-builder .wb-slot.dim{opacity:.8}',
+      '#tab-builder .wb-glow{width:34px;height:34px;border-radius:10px!important;background-color:#0b0b0d!important}',
+      '#tab-builder .wb-tools{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 0;align-items:center}#tab-builder .wb-tools select{margin-left:auto;flex:0 1 220px}',
+      '#tab-builder .wb-tools .wb-btn{padding:8px 12px!important;font-size:12px!important;color:#b4b4bd!important}#tab-builder .wb-tools .wb-btn:hover{color:#fff!important}',
+      '#tab-builder .wb-seg{display:inline-flex;gap:4px;padding:4px;border:1px solid #ffffff12;border-radius:13px;background:#ffffff03;flex-wrap:wrap}',
+      '#tab-builder .wb-seg button{background-color:transparent!important;border:1px solid transparent!important;color:#a4a4b0!important;border-radius:9px!important;padding:7px 14px!important;font-size:12px!important;font-weight:600;display:inline-flex;align-items:center;gap:6px}',
+      '#tab-builder .wb-seg button:hover{color:#e1e1e8!important;background-color:#ffffff06!important}',
+      '#tab-builder .wb-seg button.sel{background-color:#ffffff12!important;color:#f1f1f5!important;border-color:#ffffff15!important;box-shadow:inset 0 1px #ffffff0a!important}',
+      '#tab-builder .wb-hint{margin:12px 0 0;font-size:12px;color:var(--dim)}#tab-builder .wb-status{min-height:20px;margin:2px 4px 12px;font-size:12px;color:var(--dim)}',
+      '@media(max-width:560px){#tab-builder .wb-tools select{margin-left:0;flex:1 1 100%}#tab-builder .wb-right{margin-left:0}}'
+    ].join('');
+    section.append(style); tabs.append(tab); body.append(section);
+    const $ = sel => section.querySelector(sel);
+    const canvas = $('canvas'), ctx = canvas.getContext('2d'), seqEl = $('[data-seq]'), gseqEl = $('[data-gseq]'), palEl = $('[data-pal]'), glowEl = $('[data-glows]'), srcEl = $('[data-src]'), statusEl = $('[data-status]'), nameEl = $('[data-name]'), savedEl = $('[data-saved]'), copyEl = $('[data-copy]'), metaEl = $('[data-meta]'), hintEl = $('[data-ghint]'), gtoolsEl = $('[data-gtools]');
+    let seq = [], sel = -1, glowAuto = true, glowSeq = [], gsel = -1, editing = null, source = 'w19', inited = false, palToken = 0, loopOn = false, lastPaint = 0;
+    const imgs = {}, autoCache = new Map(), region = id => CUSTOM_DATA.regions[id], MAXN = 64;
+    const say = text => { statusEl.textContent = text || ''; };
+    async function tex(key) { if (!imgs[key]) imgs[key] = await customImage(key); return imgs[key]; }
+    function paintThumb(el, id, px) {
+      const r = region(id), img = r && imgs[r.texture];
+      if (!img) return;
+      const s = px / r.w;
+      el.style.backgroundImage = 'url("' + img.src + '")';
+      el.style.backgroundPosition = '-' + (r.x * s) + 'px -' + (r.y * s) + 'px';
+      el.style.backgroundSize = (img.naturalWidth * s) + 'px ' + (img.naturalHeight * s) + 'px';
+    }
+    async function ballRGB(id) {
+      const r = region(id), img = await tex(r.texture);
+      const c = document.createElement('canvas'); c.width = c.height = 32;
+      const g = c.getContext('2d', { willReadFrequently: true });
+      g.drawImage(img, r.x, r.y, r.w, r.h, 0, 0, 32, 32);
+      let data; try { data = g.getImageData(0, 0, 32, 32).data; } catch { return [255, 255, 255]; }
+      const buckets = new Map();
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+        if ((x - 15.5) ** 2 + (y - 15.5) ** 2 > 169) continue;
+        const i = (y * 32 + x) * 4; if (data[i + 3] < 200) continue;
+        const R = data[i], G = data[i + 1], B = data[i + 2]; if (R + G + B < 72) continue;
+        const k = ((R >> 4) << 8) | ((G >> 4) << 4) | (B >> 4);
+        let b = buckets.get(k); if (!b) buckets.set(k, b = { n: 0, r: 0, g: 0, b: 0 });
+        b.n++; b.r += R; b.g += G; b.b += B;
+      }
+      let best = null; for (const b of buckets.values()) if (!best || b.n > best.n) best = b;
+      return best ? [best.r / best.n, best.g / best.n, best.b / best.n] : [255, 255, 255];
+    }
+    async function autoGlow(id) {
+      if (autoCache.has(id)) return autoCache.get(id);
+      let rgb; try { rgb = await ballRGB(id); } catch { rgb = [255, 255, 255]; }
+      let best = BUILDER_AUTO_GLOWS[0], bd = Infinity;
+      for (const a of BUILDER_AUTO_GLOWS) { const d = (a[1] - rgb[0]) ** 2 + (a[2] - rgb[1]) ** 2 + (a[3] - rgb[2]) ** 2; if (d < bd) { bd = d; best = a; } }
+      autoCache.set(id, best[0]); return best[0];
+    }
+    const autoList = () => seq.map(id => autoCache.get(id) || 'W19_g0');
+    const glowsFor = () => glowAuto ? autoList() : glowSeq;
+    function drawRegion(id, x, y, size, angle) {
+      const r = region(id), img = r && imgs[r.texture]; if (!img) return;
+      const pw = r.pw || r.w, ph = r.ph || r.h, ax = .5 - ((r.px || pw / 2) - .5 * pw) / r.w, ay = .5 - ((r.py || ph / 2) - .5 * ph) / r.h, w = size * r.w / pw, h = size * r.h / ph;
+      ctx.save(); ctx.translate(x, y); ctx.rotate(angle); ctx.drawImage(img, r.x, r.y, r.w, r.h, -ax * w, -ay * h, w, h); ctx.restore();
+    }
+    function paint(time) {
+      ctx.clearRect(0, 0, 640, 200);
+      if (!seq.length) { ctx.fillStyle = '#8a8a93'; ctx.font = '14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Pick balls below to build your skin', 320, 104); return; }
+      const size = 66, left = 150, right = 490, y = 100, count = Math.round((right - left) / (size / 4)) + 1, phase = time / 200;
+      const wave = i => Math.cos(i / 12 * Math.PI - phase) * (1 - Math.pow(16, -i / 12)) * size / 4, gl = glowsFor();
+      for (let pass = 0; pass < 2; pass++) for (let i = count - 1; i >= 0; i--) {
+        const x = right - (right - left) * i / (count - 1), cy = y + wave(i), angle = Math.atan2(wave(Math.max(0, i - 1)) - wave(i), (right - left) / (count - 1));
+        if (pass === 0 && gl.length) drawRegion(gl[i % gl.length], x, cy, size * 1.5, angle);
+        if (pass === 1) drawRegion(seq[i % seq.length], x, cy, size, angle);
+      }
+      ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(right + 4, y - 11, 4, 0, Math.PI * 2); ctx.arc(right + 4, y + 11, 4, 0, Math.PI * 2); ctx.fill();
+    }
+    function loop(t) {
+      loopOn = false;
+      if (!section.isConnected || !section.classList.contains('active') || document.hidden) return;
+      if (t - lastPaint >= 33) { paint(t); lastPaint = t; }
+      loopOn = true; nativeRAF(loop);
+    }
+    const kick = () => { if (!loopOn && section.classList.contains('active')) { loopOn = true; nativeRAF(loop); } };
+    function updateMeta() {
+      const n = glowsFor().length;
+      metaEl.innerHTML = '<span>' + seq.length + (seq.length === 1 ? ' ball' : ' balls') + '</span><span>' + n + (n === 1 ? ' border colour' : ' border colours') + (glowAuto ? ' (auto)' : '') + '</span>';
+    }
+    function renderSeq() {
+      seqEl.textContent = ''; seqEl.classList.toggle('empty', !seq.length);
+      if (!seq.length) seqEl.textContent = 'No balls yet. Pick some in step 3.';
+      seq.forEach((id, i) => {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'wb-ball' + (i === sel ? ' sel' : ''); b.dataset.i = i + 1; b.title = 'Ball ' + (i + 1);
+        paintThumb(b, id, 44); b.onclick = () => { sel = sel === i ? -1 : i; renderSeq(); }; seqEl.append(b);
+      });
+      renderGlowStrip(); updateMeta();
+    }
+    function renderGlowStrip() {
+      const list = glowsFor(); gseqEl.textContent = ''; gseqEl.classList.toggle('empty', !list.length);
+      if (!list.length) gseqEl.textContent = glowAuto ? 'Add balls to see the automatic border.' : 'No border colours. Pick one below to add a slot.';
+      list.forEach((id, i) => {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'wb-slot' + (!glowAuto && i === gsel ? ' sel' : '') + (glowAuto ? ' dim' : ''); b.dataset.i = i + 1; b.title = 'Border slot ' + (i + 1);
+        paintThumb(b, id, 38); b.onclick = () => { if (glowAuto) toCustom(); gsel = gsel === i ? -1 : i; renderGlowStrip(); }; gseqEl.append(b);
+      });
+      section.querySelectorAll('[data-gmode]').forEach(b => b.classList.toggle('sel', (b.dataset.gmode === 'auto') === glowAuto));
+      gtoolsEl.style.display = glowAuto ? 'none' : '';
+      hintEl.textContent = glowAuto ? 'Auto matches each ball. Pick a colour below (or a slot) to take control of the border.'
+        : (gsel >= 0 ? 'Slot ' + (gsel + 1) + ' selected: pick a colour to paint it (the selection then moves to the next slot).' : 'Pick a slot and then a colour to paint it, or just pick a colour to add a new slot.');
+    }
+    function toCustom() {
+      if (!glowAuto) return;
+      glowAuto = false; glowSeq = autoList().slice(0, MAXN); gsel = -1;
+    }
+    function pickGlow(id) {
+      toCustom();
+      if (gsel >= 0 && gsel < glowSeq.length) { glowSeq[gsel] = id; gsel = Math.min(gsel + 1, glowSeq.length - 1); }
+      else if (glowSeq.length < MAXN) { glowSeq.push(id); gsel = -1; }
+      else { say('Maximum of ' + MAXN + ' border colours.'); }
+      renderGlowStrip(); updateMeta();
+    }
+    function renderGlows() {
+      glowEl.textContent = '';
+      for (const id of BUILDER_GLOW_IDS) {
+        if (!region(id)) continue;
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'wb-glow'; b.title = id.replace(/^[A-Za-z0-9]+_/, '');
+        paintThumb(b, id, 34); b.onclick = () => pickGlow(id); glowEl.append(b);
+      }
+    }
+    function renderSrc() {
+      srcEl.textContent = '';
+      for (const s of BUILDER_SOURCES) {
+        const b = document.createElement('button'); b.type = 'button'; b.textContent = s.label; b.className = source === s.id ? 'sel' : '';
+        b.onclick = () => { source = s.id; renderSrc(); renderPal(); }; srcEl.append(b);
+      }
+    }
+    function addBall(id) {
+      if (seq.length >= MAXN) { say('Maximum of ' + MAXN + ' balls.'); return; }
+      const at = sel >= 0 ? sel + 1 : seq.length; seq.splice(at, 0, id); sel = at; renderSeq();
+      if (glowAuto) autoGlow(id).then(() => { renderGlowStrip(); updateMeta(); });
+    }
+    async function renderPal() {
+      const token = ++palToken, src = BUILDER_SOURCES.find(s => s.id === source);
+      palEl.textContent = 'Loading images...';
+      try { await tex(src.tex); } catch (e) { palEl.textContent = ''; say('Could not load the ' + src.label + ' images: ' + (e && e.message || e)); return; }
+      if (token !== palToken) return;
+      const ids = Object.entries(CUSTOM_DATA.regions).filter(([id, r]) => src.ok(id, r)).map(e => e[0]);
+      ids.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      const frag = document.createDocumentFragment();
+      for (const id of ids) { const b = document.createElement('button'); b.type = 'button'; b.className = 'wb-cell'; b.title = id.replace(/^[A-Za-z0-9]+_/, ''); paintThumb(b, id, 52); b.onclick = () => addBall(id); frag.append(b); }
+      palEl.textContent = ''; palEl.append(frag); say(ids.length + ' balls in ' + src.label + '.');
+    }
+    function renderSaved() {
+      savedEl.textContent = '';
+      const first = document.createElement('option'); first.value = ''; first.textContent = mySkins.length ? 'My saved skins (' + mySkins.length + ')' : 'No saved skins yet'; savedEl.append(first);
+      for (const s of mySkins) { const o = document.createElement('option'); o.value = s.id; o.textContent = s.name; savedEl.append(o); }
+      savedEl.value = editing || '';
+    }
+    function renderCopy() {
+      copyEl.textContent = '';
+      const first = document.createElement('option'); first.value = ''; first.textContent = 'Copy from a skin...'; copyEl.append(first);
+      for (const g of CUSTOM_DATA.groups) {
+        const og = document.createElement('optgroup'); og.label = g.name;
+        for (const id of g.ids) { if (!CUSTOM_DATA.skin[id]) continue; const o = document.createElement('option'); o.value = id; o.textContent = (CUSTOM_DATA.names && CUSTOM_DATA.names[id]) || ('Skin ' + id); og.append(o); }
+        if (og.children.length) copyEl.append(og);
+      }
+    }
+    async function loadInto(frames, glows, mode, name, id) {
+      const gl = (glows || []).filter(r => region(r));
+      try { await Promise.all([...new Set(frames.concat(gl).map(r => region(r).texture))].map(tex)); } catch (e) { say('Could not load images: ' + (e && e.message || e)); return; }
+      seq = frames.slice(); sel = -1; gsel = -1; editing = id || null; nameEl.value = name || '';
+      if (mode === 'auto' || !gl.length) { glowAuto = true; glowSeq = []; }
+      else { glowAuto = false; glowSeq = gl.slice(0, MAXN); }
+      renderSeq(); renderGlows(); renderSaved(); if (glowAuto) Promise.all(seq.map(autoGlow)).then(() => { renderGlowStrip(); updateMeta(); });
+    }
+    function newSkin() { seq = []; sel = -1; glowAuto = true; glowSeq = []; gsel = -1; editing = null; nameEl.value = ''; copyEl.value = ''; renderSeq(); renderSaved(); say(''); }
+    async function save() {
+      if (!seq.length) { say('Add at least one ball first.'); return; }
+      if (!glowAuto && !glowSeq.length) { say('Pick at least one border colour, or switch the border back to Auto.'); return; }
+      say('Saving...');
+      const glows = glowAuto ? await Promise.all(seq.map(autoGlow)) : glowSeq.slice();
+      const id = editing || ('MY_' + Date.now().toString(36));
+      const rec = { id, name: (nameEl.value.trim() || ('My skin ' + (mySkins.length + (editing ? 0 : 1)))).slice(0, 28), frames: seq.slice(), glows, glowMode: glowAuto ? 'auto' : 'custom' };
+      const at = mySkins.findIndex(s => s.id === id); if (at >= 0) mySkins[at] = rec; else mySkins.push(rec);
+      store.set(MY_SKINS_KEY, JSON.stringify(mySkins)); editing = id; nameEl.value = rec.name;
+      syncMySkins();
+      customPrefs.skin = id; customPrefs.enabled = true; store.set('wzg-custom', JSON.stringify(customPrefs));
+      document.querySelectorAll('[data-enabled]').forEach(c => { c.checked = true; });
+      renderSaved(); renderCopy();
+      try { await customRefresh(); say('Saved "' + rec.name + '" and applied it to your snake.'); } catch (e) { say('Saved, but applying failed: ' + (e && e.message || e)); }
+    }
+    function remove() {
+      if (!editing) { say('Pick a saved skin first.'); return; }
+      const id = editing; mySkins = mySkins.filter(s => s.id !== id); store.set(MY_SKINS_KEY, JSON.stringify(mySkins));
+      if (customPrefs.skin === id) { customPrefs.skin = 'original'; store.set('wzg-custom', JSON.stringify(customPrefs)); customRefresh(); }
+      syncMySkins(); newSkin(); renderCopy(); say('Skin deleted.');
+    }
+    section.querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
+      const act = b.dataset.act, i = sel >= 0 ? sel : seq.length - 1;
+      if (act === 'clear') { seq = []; sel = -1; }
+      else if (act === 'rev') { seq.reverse(); sel = sel >= 0 ? seq.length - 1 - sel : -1; }
+      else if (i < 0) return;
+      else if (act === 'left' && i > 0) { [seq[i - 1], seq[i]] = [seq[i], seq[i - 1]]; sel = i - 1; }
+      else if (act === 'right' && i < seq.length - 1) { [seq[i + 1], seq[i]] = [seq[i], seq[i + 1]]; sel = i + 1; }
+      else if (act === 'dup' && seq.length < MAXN) { seq.splice(i + 1, 0, seq[i]); sel = i + 1; }
+      else if (act === 'del') { seq.splice(i, 1); sel = Math.min(sel, seq.length - 1); }
+      renderSeq();
+    });
+    section.querySelectorAll('[data-gact]').forEach(b => b.onclick = () => {
+      const act = b.dataset.gact; toCustom();
+      const i = gsel >= 0 ? gsel : glowSeq.length - 1;
+      if (act === 'match') {
+        const n = Math.min(MAXN, seq.length), last = glowSeq[glowSeq.length - 1] || 'W19_g0';
+        if (n) { while (glowSeq.length < n) glowSeq.push(last); glowSeq.length = n; if (gsel >= n) gsel = n - 1; } else say('Add balls first.');
+      } else if (act === 'add') { if (glowSeq.length < MAXN) { glowSeq.splice(i + 1, 0, glowSeq[i] || 'W19_g0'); gsel = i + 1; } }
+      else if (i < 0) return;
+      else if (act === 'left' && i > 0) { [glowSeq[i - 1], glowSeq[i]] = [glowSeq[i], glowSeq[i - 1]]; gsel = i - 1; }
+      else if (act === 'right' && i < glowSeq.length - 1) { [glowSeq[i + 1], glowSeq[i]] = [glowSeq[i], glowSeq[i + 1]]; gsel = i + 1; }
+      else if (act === 'del') { glowSeq.splice(i, 1); gsel = Math.min(gsel, glowSeq.length - 1); }
+      renderGlowStrip(); updateMeta();
+    });
+    section.querySelectorAll('[data-gmode]').forEach(b => b.onclick = () => {
+      if (b.dataset.gmode === 'auto') { glowAuto = true; glowSeq = []; gsel = -1; Promise.all(seq.map(autoGlow)).then(() => { renderGlowStrip(); updateMeta(); }); }
+      else toCustom();
+      renderGlowStrip(); updateMeta();
+    });
+    savedEl.onchange = () => { const s = mySkins.find(x => x.id === savedEl.value); if (s) loadInto(s.frames, s.glows, s.glowMode === 'auto' ? 'auto' : 'custom', s.name, s.id); else newSkin(); };
+    copyEl.onchange = () => { const id = copyEl.value; if (!id) return; loadInto(CUSTOM_DATA.skin[id], CUSTOM_DATA.glows[id], 'custom', ((CUSTOM_DATA.names && CUSTOM_DATA.names[id]) || ('Skin ' + id)) + ' copy', null); };
+    $('[data-new]').onclick = newSkin; $('[data-save]').onclick = save; $('[data-del]').onclick = remove;
+    async function init() {
+      renderSaved(); renderCopy(); renderSeq(); renderSrc();
+      try { await Promise.all([tex('W19'), tex('W18')]); } catch (e) { say('Could not load the border images: ' + (e && e.message || e)); }
+      renderGlows(); renderSeq(); await renderPal();
+    }
+    tab.onclick = () => {
+      modal.querySelectorAll('#settings-tabs .tab,.settings-body .sectionS').forEach(e => e.classList.remove('active'));
+      tab.classList.add('active'); section.classList.add('active');
+      if (!inited) { inited = true; init(); }
+      kick();
+    };
+  }
+  // ===== end Skin builder UI =====
   const CUSTOM_TABS={custom:{id:'custom',label:'Wormate skins',wearOnly:false,filter:k=>!k.startsWith('WW')},wormworld:{id:'wormworld',label:'Wormworld',wearOnly:true,filter:k=>k.startsWith('WW')}};
   // As regras de CSS da aba usam #tab-custom; para as outras abas copiamos so as regras que citam esse id (CSS mobile global).
   function cloneTabStyles(id){
@@ -4698,7 +5025,7 @@ function bindRedHelper(owner){
     const labels={eyes:'Eyes',mouth:'Mouth',glasses:'Glasses',hat:'Hats'};
     const art={eyes:'<ellipse cx="31" cy="27" rx="17" ry="19"/><ellipse cx="76" cy="27" rx="17" ry="19"/><circle cx="31" cy="32" r="10"/><circle cx="76" cy="32" r="10"/>',mouth:'<path d="M9 12 Q54 25 99 12 Q54 63 9 12Z"/>',glasses:'<circle cx="30" cy="29" r="17"/><circle cx="79" cy="29" r="17"/><path d="M47 25 Q54 19 62 25 M13 23 L6 19 M96 23 L103 19"/>',hat:'<path d="M13 35 Q54 45 97 35 L100 44 Q54 53 10 44Z M20 36 L26 17 Q54 33 82 17 L90 36"/><circle cx="29" cy="13" r="9"/><circle cx="80" cy="13" r="9"/>'};
     for(const key of Object.keys(labels)){const b=document.createElement('button');b.type='button';b.dataset.wear=key;b.setAttribute('role','tab');b.setAttribute('aria-label',labels[key]);b.innerHTML='<svg viewBox="0 0 110 58" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">'+art[key]+'</svg>';b.onclick=()=>{wear=key;sync();};section.querySelector('.wc-clothing').append(b);}
-    const groups=section.querySelector('.wc-groups');for(const g of [{id:'all',name:'All skins'},...CUSTOM_DATA.groups]){const b=document.createElement('button');b.type='button';b.textContent=g.name;b.dataset.group=g.id;b.onclick=()=>{group=g.id==='all'?null:g;sync();};groups.append(b);}
+    const groups=section.querySelector('.wc-groups');const buildGroups=()=>{groups.textContent='';for(const g of [{id:'all',name:'All skins'},...CUSTOM_DATA.groups]){const b=document.createElement('button');b.type='button';b.textContent=g.name;b.dataset.group=g.id;b.onclick=()=>{group=g.id==='all'?null:g;sync();};groups.append(b);}};buildGroups();customGroupRebuilders.push(()=>{if(!section.isConnected)return;buildGroups();group=group?(CUSTOM_DATA.groups.find(x=>x.id===group.id)||null):null;sync(false);});
     const key=()=>mode==='skin'?'skin':wear;
     const list=()=>mode==='skin'?(group?group.ids:Object.keys(CUSTOM_DATA.skin)):Object.keys(CUSTOM_DATA[wear]).filter(cfg.filter);
     function save(){store.set('wzg-custom',JSON.stringify(customPrefs));customRefresh();draw();}
@@ -4708,7 +5035,7 @@ function bindRedHelper(owner){
     section.querySelector('.wc-prev').onclick=()=>step(-1);section.querySelector('.wc-next').onclick=()=>step(1);
     section.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;sync();});section.querySelector('[data-back]').onclick=()=>{mode='skin';sync();};
     enabled.onchange=()=>{customPrefs.enabled=enabled.checked;save();};section.querySelector('[data-reset]').onclick=()=>{Object.assign(customPrefs,customDefaults);enabled.checked=false;save();sync();};section.querySelector('[data-retry]').onclick=()=>{customRefresh();draw();};
-    function sync(redraw=true){section.dataset.mode=mode;section.querySelector('[data-title]').textContent=mode==='skin'?'Skins':(cfg.wearOnly?cfg.label:'Clothing');section.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('selected',b.dataset.mode===mode));section.querySelectorAll('[data-wear]').forEach(b=>{b.classList.toggle('selected',b.dataset.wear===wear);b.setAttribute('aria-selected',String(b.dataset.wear===wear));});groups.querySelectorAll('button').forEach(b=>b.classList.toggle('selected',b.dataset.group===(group?.id||'all')));const value=customPrefs[key()];select.textContent=value==='original'?'Original':mode==='skin'?'SKIN '+value:(CUSTOM_DATA[wear][value].length?labels[wear]+' '+((CUSTOM_DATA.names&&CUSTOM_DATA.names[value])||value):'None');if(redraw)draw();}
+    function sync(redraw=true){section.dataset.mode=mode;section.querySelector('[data-title]').textContent=mode==='skin'?'Skins':(cfg.wearOnly?cfg.label:'Clothing');section.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('selected',b.dataset.mode===mode));section.querySelectorAll('[data-wear]').forEach(b=>{b.classList.toggle('selected',b.dataset.wear===wear);b.setAttribute('aria-selected',String(b.dataset.wear===wear));});groups.querySelectorAll('button').forEach(b=>b.classList.toggle('selected',b.dataset.group===(group?.id||'all')));const value=customPrefs[key()];select.textContent=value==='original'?'Original':mode==='skin'?'SKIN '+((CUSTOM_DATA.names&&CUSTOM_DATA.names[value])||value):(CUSTOM_DATA[wear][value].length?labels[wear]+' '+((CUSTOM_DATA.names&&CUSTOM_DATA.names[value])||value):'None');if(redraw)draw();}
     let paint=null,framePending=false,inView=false,lastPaint=-Infinity;
     function animate(time){framePending=false;if(!section.isConnected){visibility.disconnect();document.removeEventListener('visibilitychange',wake);return;}if(!inView||document.hidden||!paint)return;if(time-lastPaint>=1000/30){paint(time);lastPaint=time;}framePending=true;nativeRAF(animate);}
     function wake(){if(inView&&!document.hidden&&paint&&!framePending){framePending=true;nativeRAF(animate);}}
