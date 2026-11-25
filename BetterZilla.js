@@ -1,5 +1,4 @@
 
-
 (() => {
   'use strict';
 
@@ -4717,7 +4716,7 @@ function bindRedHelper(owner){
   const BUILDER_ICONS = {
     left: 'M15 6l-6 6 6 6', right: 'M9 6l6 6-6 6', dup: 'M9 9h10v10H9zM5 15V5h10', del: 'M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13', rev: 'M4 8h13l-3-3M20 16H7l3 3',
     clear: 'M6 6l12 12M18 6L6 18', plus: 'M12 5v14M5 12h14', minus: 'M5 12h14', match: 'M4 7h16M4 12h10M4 17h16', auto: 'M5 19l9-9M14 4l1.5 3L19 8.5 15.5 10 14 13l-1.5-3L9 8.5 12.5 7zM18 15l.8 1.7L20.5 17.5 18.8 18.3 18 20l-.8-1.7L15.5 17.5l1.7-.8z',
-    save: 'M5 12l5 5L19 7', new: 'M12 5v14M5 12h14'
+    rep: 'M17 2l4 4-4 4M3 11V9a3 3 0 013-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 01-3 3H3', save: 'M5 12l5 5L19 7', new: 'M12 5v14M5 12h14'
   };
   const bIcon = (n, extra) => '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"' + (extra || '') + '><path d="' + BUILDER_ICONS[n] + '"/></svg>';
   function mountSkinBuilder(modal) {
@@ -4732,9 +4731,9 @@ function bindRedHelper(owner){
       '<div class="wb-top"><input data-name type="text" maxlength="28" placeholder="Name your skin"><select data-saved title="Your saved skins"></select>'
       + '<div class="wb-actions">' + btn('data-new', 'new', 'New') + btn('data-save', 'save', 'Save &amp; use', 'wb-primary') + btn('data-del', 'del', 'Delete', 'wb-danger') + '</div></div>'
       + '<div class="wb-card wb-hero"><div class="wb-stage"><canvas width="640" height="200" aria-label="Skin preview"></canvas><div class="wb-meta" data-meta></div></div></div>'
-      + '<div class="wb-card"><div class="wb-title"><i>1</i><b>Body</b><span>Balls repeat along the snake. First ball = head.</span></div>'
+      + '<div class="wb-card"><div class="wb-title"><i>1</i><b>Body</b><span>Repeats along the snake, first ball = head. Flags and big patterns look best with 20-30+ balls.</span></div>'
       + '<div class="wb-seq" data-seq></div>'
-      + '<div class="wb-tools">' + btn('data-act="left" title="Move left"', 'left') + btn('data-act="right" title="Move right"', 'right') + btn('data-act="dup"', 'dup', 'Duplicate') + btn('data-act="del"', 'minus', 'Remove') + btn('data-act="rev"', 'rev', 'Reverse') + btn('data-act="clear"', 'clear', 'Clear')
+      + '<div class="wb-tools">' + btn('data-act="left" title="Move left"', 'left') + btn('data-act="right" title="Move right"', 'right') + btn('data-act="dup"', 'dup', 'Duplicate') + btn('data-act="rep"', 'rep', 'Repeat all') + btn('data-act="del"', 'minus', 'Remove') + btn('data-act="rev"', 'rev', 'Reverse') + btn('data-act="clear"', 'clear', 'Clear')
       + '<select data-copy><option value="">Copy from a skin...</option></select></div></div>'
       + '<div class="wb-card"><div class="wb-title"><i>2</i><b>Border</b><span>Its own colour sequence: use 1, 2, 3 or as many colours as balls.</span>'
       + '<div class="wb-seg wb-right"><button type="button" data-gmode="auto">' + bIcon('auto') + 'Auto</button><button type="button" data-gmode="custom">Custom</button></div></div>'
@@ -4787,7 +4786,7 @@ function bindRedHelper(owner){
     const $ = sel => section.querySelector(sel);
     const canvas = $('canvas'), ctx = canvas.getContext('2d'), seqEl = $('[data-seq]'), gseqEl = $('[data-gseq]'), palEl = $('[data-pal]'), glowEl = $('[data-glows]'), srcEl = $('[data-src]'), statusEl = $('[data-status]'), nameEl = $('[data-name]'), savedEl = $('[data-saved]'), copyEl = $('[data-copy]'), metaEl = $('[data-meta]'), hintEl = $('[data-ghint]'), gtoolsEl = $('[data-gtools]');
     let seq = [], sel = -1, glowAuto = true, glowSeq = [], gsel = -1, editing = null, source = 'w19', inited = false, palToken = 0, loopOn = false, lastPaint = 0;
-    const imgs = {}, autoCache = new Map(), region = id => CUSTOM_DATA.regions[id], MAXN = 64;
+    const imgs = {}, autoCache = new Map(), region = id => CUSTOM_DATA.regions[id], MAXN = 300;
     const say = text => { statusEl.textContent = text || ''; };
     async function tex(key) { if (!imgs[key]) imgs[key] = await customImage(key); return imgs[key]; }
     function paintThumb(el, id, px) {
@@ -4833,7 +4832,9 @@ function bindRedHelper(owner){
     function paint(time) {
       ctx.clearRect(0, 0, 640, 200);
       if (!seq.length) { ctx.fillStyle = '#8a8a93'; ctx.font = '14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Pick balls below to build your skin', 320, 104); return; }
-      const size = 66, left = 150, right = 490, y = 100, count = Math.round((right - left) / (size / 4)) + 1, phase = time / 200;
+      const left = 150, right = 490, y = 100, phase = time / 200;
+      // short sequences keep the in-game size; long ones shrink so the whole pattern fits in the preview
+      const size = Math.max(14, Math.min(66, Math.round((right - left) * 4 / (seq.length + 3)))), count = Math.max(2, Math.round((right - left) / (size / 4)) + 1);
       const wave = i => Math.cos(i / 12 * Math.PI - phase) * (1 - Math.pow(16, -i / 12)) * size / 4, gl = glowsFor();
       for (let pass = 0; pass < 2; pass++) for (let i = count - 1; i >= 0; i--) {
         const x = right - (right - left) * i / (count - 1), cy = y + wave(i), angle = Math.atan2(wave(Math.max(0, i - 1)) - wave(i), (right - left) / (count - 1));
@@ -4969,6 +4970,7 @@ function bindRedHelper(owner){
       else if (act === 'left' && i > 0) { [seq[i - 1], seq[i]] = [seq[i], seq[i - 1]]; sel = i - 1; }
       else if (act === 'right' && i < seq.length - 1) { [seq[i + 1], seq[i]] = [seq[i], seq[i + 1]]; sel = i + 1; }
       else if (act === 'dup' && seq.length < MAXN) { seq.splice(i + 1, 0, seq[i]); sel = i + 1; }
+      else if (act === 'rep') { const copy = seq.slice(); for (let k = 0; k < copy.length && seq.length < MAXN; k++) seq.push(copy[k]); sel = -1; if (seq.length >= MAXN) say('Reached the limit of ' + MAXN + ' balls.'); }
       else if (act === 'del') { seq.splice(i, 1); sel = Math.min(sel, seq.length - 1); }
       renderSeq();
     });
